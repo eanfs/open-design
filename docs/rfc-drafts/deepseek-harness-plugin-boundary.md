@@ -2,7 +2,6 @@
 
 **Status:** Draft (architecture assessment; no behavior ships with this document)
 **Source snapshot:** OpenDesign `0dc31fef636c0f3e0e388a5e4d191d94a725e011`; DeepSeek Harness `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`
-**Related:** [#7455](https://github.com/nexu-io/open-design/issues/7455)
 
 English | [简体中文](./deepseek-harness-plugin-boundary.zh-CN.md)
 

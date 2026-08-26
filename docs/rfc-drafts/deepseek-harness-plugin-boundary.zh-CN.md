@@ -2,7 +2,6 @@
 
 **状态：** 草案（架构评估；本文档不交付行为变更）
 **源码快照：** OpenDesign `0dc31fef636c0f3e0e388a5e4d191d94a725e011`；DeepSeek Harness `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`
-**相关 Issue：** [#7455](https://github.com/nexu-io/open-design/issues/7455)
 
 [English](./deepseek-harness-plugin-boundary.md) | 简体中文
 
