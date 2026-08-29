@@ -18,6 +18,8 @@
 - Aurora 对外只发布 Web；仓库现有 `od` CLI 与桌面源码保留，但 Aurora 页面不得宣传、下载或引导客户使用它们。
 - 不增加 Task Center、第二套 Studio 或第二套 Project 页面。
 - 新组件优先使用 `@open-design/components`；组件样式使用同目录 CSS Modules，不向 `apps/web/src/index.css` 添加声明。
+- 除产品名 `Aurora Agent Web` 和套餐名 `Creator`、`Pro`、`Studio` 等明确的品牌/专有名词外，所有 Aurora 用户可见文案必须使用类型化 i18n key，不得在组件中硬编码中文或英文回退。
+- Aurora 浏览器产品遵循当前 Web 的 19 locale 契约；每个新增 key 必须先加入 `apps/web/src/i18n/types.ts`，再由全部 locale 文件显式提供本地化值。首发不使用 `...en` 或运行时缺省值代替翻译。
 - 未登录用户可以浏览技能与填写草稿；创建 Project/Run 前将草稿安全保存在当前浏览器会话并发起登录。
 - 余额客户端状态只改善体验，不能替代控制面 `POST /api/runs` 的服务端预占。
 - Aurora 页面不显示 Runtime、执行模式、BYOK、供应商密钥、媒体 Provider 或模型选择器。
@@ -36,6 +38,30 @@
 - `apps/web/tests/product/profile.test.ts`
 - `apps/web/tests/product/aurora-api.test.ts`
 - `apps/web/tests/product/aurora-run-gate.test.ts`
+
+### Modify typed Aurora localization
+
+- `apps/web/src/i18n/types.ts`
+- `apps/web/src/i18n/locales/ar.ts`
+- `apps/web/src/i18n/locales/de.ts`
+- `apps/web/src/i18n/locales/en.ts`
+- `apps/web/src/i18n/locales/es-ES.ts`
+- `apps/web/src/i18n/locales/fa.ts`
+- `apps/web/src/i18n/locales/fr.ts`
+- `apps/web/src/i18n/locales/hu.ts`
+- `apps/web/src/i18n/locales/id.ts`
+- `apps/web/src/i18n/locales/it.ts`
+- `apps/web/src/i18n/locales/ja.ts`
+- `apps/web/src/i18n/locales/ko.ts`
+- `apps/web/src/i18n/locales/pl.ts`
+- `apps/web/src/i18n/locales/pt-BR.ts`
+- `apps/web/src/i18n/locales/ru.ts`
+- `apps/web/src/i18n/locales/th.ts`
+- `apps/web/src/i18n/locales/tr.ts`
+- `apps/web/src/i18n/locales/uk.ts`
+- `apps/web/src/i18n/locales/zh-CN.ts`
+- `apps/web/src/i18n/locales/zh-TW.ts`
+- `apps/web/tests/i18n/locales.test.ts`
 
 ### Create Aurora browser surfaces
 
@@ -117,6 +143,14 @@ export const AURORA_IDENTITY: ProductIdentity = {
 };
 ```
 
+## Aurora Localization Contract
+
+- `Aurora Agent Web`、`Aurora`、`Creator`、`Pro` 和 `Studio` 是服务端或产品身份拥有的专有名词，所有 locale 原样显示；价格、积分数量、币种和套餐权益仍只来自服务端响应。
+- 其余用户可见文案使用 `aurora.*` 扁平 key，并按所有权分为 `aurora.home.*`、`aurora.commerce.*`、`aurora.plans.*`、`aurora.ledger.*` 和 `aurora.runGate.*`。
+- React 组件通过 `useT()` 或显式注入的翻译函数读取文案；组件、状态模块和 API client 不携带中文或英文 fallback 文案。
+- `apps/web/src/i18n/types.ts` 是 key 的类型真相来源。`en`、`zh-CN`、`zh-TW` 和其余 16 个 locale 都必须显式声明新增的 `aurora.*` key；不得使用 `...en` 或运行时缺省值补齐 Aurora 文案。
+- 同一个 key 的插值占位符在所有 locale 中完全一致。新文案必须通过现有 `apps/web/tests/i18n/locales.test.ts` 的 key、显式声明和 placeholder parity 检查。
+
 ## Aurora Home Interaction Contract
 
 The Aurora home is one calm page, not a dashboard grid:
@@ -146,7 +180,19 @@ The form fields are fixed at launch:
 - [ ] Run focused test, Web typecheck and one default Web build; expect pass.
 - [ ] Commit: `feat(web): add Aurora product identity`
 
-## Task 2: Add a typed Aurora commerce client and state owner
+## Task 2: Define the typed Aurora localization contract
+
+**Files:** `apps/web/src/i18n/types.ts`, all 19 files under `apps/web/src/i18n/locales/`, and `apps/web/tests/i18n/locales.test.ts` listed above.
+
+- [ ] Extend `locales.test.ts` with a failing Aurora key inventory. Assert every supported locale source explicitly declares every required `aurora.*` key and all locales use the same interpolation placeholders.
+- [ ] Include keys for every surface introduced later in this plan: home/catalog/forms, account and commerce bar, plans/checkout/top-up, wallet and ledger, sign-in handoff, estimate and Run gate, insufficient balance, loading, empty and error states. Group the flat keys under `aurora.home.*`, `aurora.commerce.*`, `aurora.plans.*`, `aurora.ledger.*` and `aurora.runGate.*`.
+- [ ] Run `corepack pnpm --filter @open-design/web test -- tests/i18n/locales.test.ts`; confirm failure because the Aurora keys do not exist.
+- [ ] Add each key to the typed `Dict` in `types.ts` first, then add an explicit native-language value to `ar`, `de`, `en`, `es-ES`, `fa`, `fr`, `hu`, `id`, `it`, `ja`, `ko`, `pl`, `pt-BR`, `ru`, `th`, `tr`, `uk`, `zh-CN` and `zh-TW`. Do not satisfy the test through `...en`, `as Dict`, placeholder copy or a component-local fallback.
+- [ ] Keep service-owned values such as price, currency, credit amount, plan entitlements and error detail outside the dictionaries. Components may localize their labels around those values but must not translate or reconstruct the server facts.
+- [ ] Run the focused locale test and `corepack pnpm --filter @open-design/web typecheck`; expect pass.
+- [ ] Commit: `feat(web): add Aurora localized product copy`
+
+## Task 3: Add a typed Aurora commerce client and state owner
 
 **Files:** Aurora API/state files and tests listed above.
 
@@ -158,7 +204,7 @@ The form fields are fixed at launch:
 - [ ] Run API tests and typecheck; expect pass.
 - [ ] Commit: `feat(web): add Aurora commerce client`
 
-## Task 3: Build the simple Aurora home catalog
+## Task 4: Build the simple Aurora home catalog
 
 **Files:** Aurora home/card files and tests; `EntryView.tsx`.
 
@@ -167,27 +213,29 @@ The form fields are fixed at launch:
 - [ ] Test anonymous submit: draft is stored, login URL opens, and `onCreateProject` is not called. Test authenticated return: draft restores once and clears after successful Project creation.
 - [ ] Run focused component test and confirm failure.
 - [ ] Implement `AuroraHomeView` and `AuroraSkillCard` with `Button` and other existing shared primitives. Use semantic form controls and CSS Modules.
+- [ ] Read every label, helper, validation error, empty state and CTA through `useT()` using the `aurora.home.*` keys from Task 2. Add one component-test witness under a non-English locale so a hardcoded Chinese or English string cannot satisfy the test.
 - [ ] In `EntryView`, branch on `ProductIdentity.profile`; keep the entire existing `EntryShell` invocation as the default branch.
 - [ ] Convert each form to the existing `onCreateProject` input: exact `skillId`, generated `pendingPrompt`, `pendingFiles`, `autoSendFirstMessage: true`, and a client request ID.
 - [ ] Render existing skills/templates without modifying their registry records or hiding legacy cards.
 - [ ] Run component tests, the existing `EntryView` tests and Web typecheck; expect pass.
 - [ ] Commit: `feat(web): add Aurora skill-first home`
 
-## Task 4: Add plans, balance, checkout and ledger surfaces
+## Task 5: Add plans, balance, checkout and ledger surfaces
 
 **Files:** commerce bar/dialog/drawer files and tests listed above.
 
 - [ ] Write tests for anonymous/sign-in state, zero balance, positive balance, Creator/Pro/Studio monthly/yearly toggle, active promotion, checkout pending/failure, top-up, portal, paginated ledger and logout.
-- [ ] Assert plan cards render only server values and never construct a Stripe Price ID or numeric credit amount locally.
+- [ ] Assert plan cards preserve server-returned tier names, prices, currencies, credit grants and entitlements under at least two UI locales, and never construct a Stripe Price ID or numeric credit amount locally.
 - [ ] Run focused component tests and confirm failure.
 - [ ] Implement a compact `AuroraCommerceBar`; place plans in a dialog and ledger in a drawer so the home stays simple.
+- [ ] Render all shell copy through the `aurora.commerce.*`, `aurora.plans.*` and `aurora.ledger.*` keys. Preserve server-returned plan names, prices, currencies, credit amounts, promotion facts and ledger values verbatim rather than putting them in a locale dictionary.
 - [ ] Use server-returned checkout URLs only after validating same-origin or the configured Stripe Checkout host; reject arbitrary redirect URLs.
 - [ ] Format credit decimal strings without converting the underlying amount to `number` before arithmetic. Formatting may use `BigInt` and locale grouping.
 - [ ] Refresh session/wallet after checkout return and on window focus; do not poll continuously.
 - [ ] Run component tests and typecheck; expect pass.
 - [ ] Commit: `feat(web): add Aurora subscription surfaces`
 
-## Task 5: Hide Runtime and BYOK controls only in Aurora
+## Task 6: Hide Runtime and BYOK controls only in Aurora
 
 **Files:**
 - Modify: `apps/web/src/components/InlineModelSwitcher.tsx`
@@ -203,7 +251,7 @@ The form fields are fixed at launch:
 - [ ] Run focused tests, existing Agent picker/settings tests and typecheck; expect pass.
 - [ ] Commit: `feat(web): hide runtime configuration in Aurora`
 
-## Task 6: Add the Aurora Run experience gate and idempotency header
+## Task 7: Add the Aurora Run experience gate and idempotency header
 
 **Files:** run-gate files/tests; `ProjectView.tsx`; `providers/daemon.ts`.
 
@@ -212,13 +260,14 @@ The form fields are fixed at launch:
 - [ ] Run focused tests and confirm failure.
 - [ ] Implement `checkAuroraRunGate` as a client experience preflight: refresh session/wallet, request a server estimate, and return a discriminated result. Never subtract credits client-side.
 - [ ] Integrate before the existing Run dispatch in `ProjectView`; keep AMR-specific gating unchanged for default OpenDesign.
-- [ ] Show estimated range and current balance in `AuroraRunGateDialog`. Allow “开始创作” only when authenticated and the server estimate fits the current wallet; offer login, plan or top-up otherwise.
+- [ ] Show estimated range and current balance in `AuroraRunGateDialog`. Allow the localized `aurora.runGate.start` action (`开始创作` in zh-CN) only when authenticated and the server estimate fits the current wallet; offer login, plan or top-up otherwise.
+- [ ] Render dialog titles, actions and client-owned error framing through `aurora.runGate.*`; keep structured server error details as server data and never replace them with a translated client guess.
 - [ ] Pass the already-generated `clientRequestId` through the dialog and provider. Do not create a second ID after confirmation.
 - [ ] Handle a final gateway 401/402/409 by refreshing commerce state and showing the server error; do not optimistically append a running task.
 - [ ] Run focused tests, existing ProjectView run tests and Web typecheck; expect pass.
 - [ ] Commit: `feat(web): gate Aurora runs with server estimates`
 
-## Task 7: Preserve the existing Project workspace as the only Studio
+## Task 8: Preserve the existing Project workspace as the only Studio
 
 **Files:**
 - Modify: `apps/web/src/App.tsx`
@@ -229,12 +278,12 @@ The form fields are fixed at launch:
 - [ ] Assert the test uses the existing ProjectView/chat/files/preview components and no Aurora task/status store.
 - [ ] Run the focused test and confirm missing commerce integration.
 - [ ] Own Aurora commerce state once in `App.tsx`; pass it to Entry and Project surfaces. Do not duplicate session/wallet fetches in every card.
-- [ ] Add the small Aurora commerce entry to the existing Project header without replacing chat, tabs, files, versions, preview or download behavior.
+- [ ] Add the small Aurora commerce entry to the existing Project header without replacing chat, tabs, files, versions, preview or download behavior; reuse the same typed `aurora.commerce.*` copy rather than introducing Project-only literals.
 - [ ] On refresh/reconnect, recover through existing Project/Conversation/Run status; refresh wallet independently after a terminal Run.
 - [ ] Run the integration test and typecheck; expect pass.
 - [ ] Commit: `feat(web): connect Aurora commerce to Project workspace`
 
-## Task 8: Add browser-level Aurora UI coverage
+## Task 9: Add browser-level Aurora UI coverage
 
 **Files:**
 - Create: `e2e/ui/aurora-product.test.ts`
@@ -255,7 +304,7 @@ The form fields are fixed at launch:
 - [ ] Run `corepack pnpm --filter @open-design/e2e test tests/packaged-smoke-workflow.test.ts`, then re-run the UI file with `OD_PLAYWRIGHT_FULLY_PARALLEL=1` and both `--shard=1/2` and `--shard=2/2` to prove topology and split independence.
 - [ ] Commit: `test(web): cover Aurora browser product`
 
-## Task 9: Prove the sale-to-result system chain
+## Task 10: Prove the sale-to-result system chain
 
 **Files:**
 - Create: `e2e/lib/aurora/fake-commerce.ts`
@@ -269,11 +318,11 @@ The form fields are fixed at launch:
 - [ ] Re-run and save a curated JSON report containing IDs/statuses/amount strings only; exclude cookies, prompts, file contents and secrets.
 - [ ] Commit: `test(aurora): prove sale to result workflow`
 
-## Task 10: Final product regression and release evidence
+## Task 11: Final product regression and release evidence
 
 **Files:** all files in this plan.
 
-- [ ] Run all new Web unit/component tests and the existing EntryView, HomeView, ProjectView, settings and provider-focused tests touched by the change.
+- [ ] Run all new Web unit/component tests, `corepack pnpm --filter @open-design/web test -- tests/i18n/locales.test.ts`, and the existing EntryView, HomeView, ProjectView, settings and provider-focused tests touched by the change.
 - [ ] Run `corepack pnpm --filter @open-design/web typecheck` and `corepack pnpm --filter @open-design/web build` once with the default profile and once with Aurora profile.
 - [ ] Run `python3 .github/scripts/scopes.py validate`, the Aurora Playwright file, the sale-to-result spec, `cd e2e && corepack pnpm typecheck`, and `corepack pnpm guard`.
 - [ ] Capture PR screenshots showing the entry point in both default OpenDesign and Aurora, plus Aurora home, plan dialog, balance block and Project result. Use the repository's normal Playwright artifact path.
