@@ -353,6 +353,10 @@ the active-run staging implementation is in
 
 ### 5.12 DeepSeek Harness
 
+For a detailed Chinese architecture reference covering the profile protocol,
+installation trust boundary, session lifecycle, failure handling, and current
+risks, see [`deepseek-harness-integration.zh-CN.md`](deepseek-harness-integration.zh-CN.md).
+
 - OpenDesign launches the user's official `dsh` installation; it does not
   bundle Harness or Node. Install the tested DSH release first and use
   `DSH_BIN` only when its executable is outside the daemon's PATH.
