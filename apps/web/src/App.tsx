@@ -18,6 +18,7 @@ import {
   stashOnboardingEntryForProject,
   type OnboardingEntry,
 } from './onboarding/onboarding-entry';
+import { webPresentation, type WebPresentation } from './product/presentation';
 import {
   deriveConfigureGlobals,
   projectKindFromMetadataToTracking,
@@ -846,13 +847,13 @@ export function App() {
     <MotionConfig reducedMotion="user">
       <IframeKeepAliveProvider>
         <WorkspaceMemberDirectoryPreloader />
-        <AppInner />
+        <AppInner presentation={webPresentation} />
       </IframeKeepAliveProvider>
     </MotionConfig>
   );
 }
 
-function AppInner() {
+function AppInner({ presentation }: { presentation: WebPresentation }) {
   const { t } = useI18n();
   const iframeKeepAlivePool = useIframeKeepAlivePool();
   const clientType = useMemo(() => detectClientType(), []);

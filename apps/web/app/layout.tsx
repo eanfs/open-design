@@ -2,12 +2,13 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { I18nProvider } from '../src/i18n';
 import { AnalyticsProvider } from '../src/analytics/provider';
+import { webPresentation } from '../src/product/presentation';
 import '@excalidraw/excalidraw/index.css';
 import '../src/index.css';
 import '../src/styles/home/index.css';
 
 export const metadata: Metadata = {
-  title: 'OpenDesign',
+  title: webPresentation.productName,
   icons: {
     icon: '/app-icon.png',
     apple: '/app-icon.png',
