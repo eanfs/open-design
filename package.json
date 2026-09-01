@@ -29,6 +29,8 @@
     "typecheck": "pnpm -r --workspace-concurrency=4 --if-present run typecheck && tsc -p scripts/tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@open-design/aurora-contracts": "workspace:*",
+    "@open-design/aurora-control-plane": "workspace:*",
     "@open-design/components": "workspace:*",
     "@open-design/daemon": "workspace:*",
     "@open-design/tools-dev": "workspace:*",

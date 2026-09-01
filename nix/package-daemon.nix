@@ -15,6 +15,7 @@
   python3,
   gnumake,
   pkg-config,
+  darwin,
 }:
 # Builds the @open-design/daemon workspace package — produces $out/bin/od.
 #
@@ -65,6 +66,9 @@ in
       python3
       gnumake
       pkg-config
+    ] ++ lib.optionals stdenv.hostPlatform.isDarwin [
+      # better-sqlite3's node-gyp build invokes Apple's `libtool`.
+      darwin.cctools
     ];
 
     # `fetchPnpmDeps` defaults to `pkgs.pnpm`; pin to the flake's
@@ -184,6 +188,8 @@ in
       # the copied node_modules tree so Nix fixup does not fail on broken
       # links.
       rm -f \
+        $out/lib/open-design/node_modules/@open-design/aurora-contracts \
+        $out/lib/open-design/node_modules/@open-design/aurora-control-plane \
         $out/lib/open-design/node_modules/@open-design/components \
         $out/lib/open-design/node_modules/@open-design/tools-dev \
         $out/lib/open-design/node_modules/@open-design/tools-pack \

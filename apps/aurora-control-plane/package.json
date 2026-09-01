@@ -1,0 +1,40 @@
+{
+  "name": "@open-design/aurora-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-injected Aurora commercial control-plane foundation.",
+  "main": "./src/server.ts",
+  "types": "./src/server.ts",
+  "exports": {
+    ".": {
+      "types": "./src/server.ts",
+      "default": "./src/server.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run tests/app.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@open-design/aurora-contracts": "workspace:*",
+    "express": "5.2.1",
+    "http-proxy": "1.18.1",
+    "openid-client": "6.8.7",
+    "pg": "8.23.0",
+    "stripe": "22.6.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/express": "5.0.6",
+    "@types/http-proxy": "1.17.17",
+    "@types/node": "24.12.2",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.6"
+  },
+  "engines": {
+    "node": "~24"
+  }
+}
