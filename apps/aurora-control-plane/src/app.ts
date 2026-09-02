@@ -1,6 +1,7 @@
 import express, { type Express } from 'express';
 
 import { createSessionRouter } from './routes/session.js';
+import { createWalletRouter } from './routes/wallet.js';
 import type { AuroraConfig } from './config.js';
 import type { AuroraDatabase } from './db.js';
 
@@ -17,6 +18,7 @@ export function createAuroraApp(deps: AuroraAppDeps): Express {
   });
 
   app.use('/api/aurora', createSessionRouter({ db: deps.db, config: deps.config }));
+  app.use('/api/aurora', createWalletRouter({ db: deps.db, config: deps.config }));
 
   return app;
 }
