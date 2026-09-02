@@ -55,6 +55,7 @@ function createTestAuroraConfig(): AuroraConfig {
     sessionTtlSeconds: 3600,
     loginStateTtlSeconds: 600,
     loginStateSigningSecret: 'test-signing-secret',
+    stripe: { secretKey: 'sk_test_aurora', webhookSecret: 'whsec_test_aurora' },
   };
 }
 
