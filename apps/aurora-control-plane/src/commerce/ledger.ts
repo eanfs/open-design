@@ -14,7 +14,8 @@ export type AuroraLedgerErrorCode =
   | 'aurora_insufficient_credits'
   | 'aurora_reservation_conflict'
   | 'aurora_reservation_not_found'
-  | 'aurora_reservation_closed';
+  | 'aurora_reservation_closed'
+  | 'aurora_account_not_found';
 
 /**
  * Typed ledger failure carrying the commerce error contract, so Task 6 run
@@ -51,7 +52,13 @@ const DIRECTION_BY_KIND: Record<EntryKind, 'credit' | 'debit'> = {
   release: 'credit',
 };
 
-const CREDIT_AMOUNT_PATTERN = /^\d+(?:\.\d{1,2})?$/;
+/**
+ * Credit amounts follow the contract format and fit wallets' NUMERIC(12, 2)
+ * storage: at most 10 integer digits (9,999,999,999.99). Amounts beyond the
+ * storage bound must fail typed validation here, not as a raw Postgres
+ * overflow deep inside a transaction.
+ */
+const CREDIT_AMOUNT_PATTERN = /^\d{1,10}(?:\.\d{1,2})?$/;
 
 function toCents(amount: string): bigint {
   const match = CREDIT_AMOUNT_PATTERN.exec(amount);
@@ -66,9 +73,14 @@ function toCents(amount: string): bigint {
 }
 
 function fromCents(cents: bigint): string {
-  const whole = cents / 100n;
-  const fraction = (cents % 100n).toString().padStart(2, '0');
-  return `${whole}.${fraction}`;
+  // BigInt division truncates toward zero, so whole/fraction must be computed
+  // from the absolute value and the sign applied once; using the signed value
+  // directly leaks '-' into the fraction ("-450n" -> "-4.-50").
+  const sign = cents < 0n ? '-' : '';
+  const absolute = cents < 0n ? -cents : cents;
+  const whole = absolute / 100n;
+  const fraction = (absolute % 100n).toString().padStart(2, '0');
+  return `${sign}${whole}.${fraction}`;
 }
 
 function requirePositiveAmount(amount: string): bigint {
@@ -88,11 +100,29 @@ function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === '23505';
 }
 
+function isForeignKeyViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === '23503';
+}
+
 async function ensureWalletRow(client: PoolClient, accountId: string): Promise<void> {
-  await client.query(
-    'INSERT INTO wallets (account_id) VALUES ($1) ON CONFLICT (account_id) DO NOTHING',
-    [accountId],
-  );
+  try {
+    await client.query(
+      'INSERT INTO wallets (account_id) VALUES ($1) ON CONFLICT (account_id) DO NOTHING',
+      [accountId],
+    );
+  } catch (error) {
+    // The wallets FK is the only constraint here; a violation means the
+    // account does not exist, which callers must see as a typed commerce
+    // error rather than a raw Postgres failure.
+    if (isForeignKeyViolation(error)) {
+      throw new AuroraLedgerError(
+        'aurora_account_not_found',
+        `No Aurora account exists with id ${accountId}`,
+        409,
+      );
+    }
+    throw error;
+  }
 }
 
 async function lockWalletBalances(
@@ -263,7 +293,13 @@ export async function getAuroraWallet(
   });
 }
 
-/** Chronological ledger view for one account, shaped as contract DTOs only. */
+/**
+ * Chronological ledger view for one account, shaped as contract DTOs only.
+ * Unbounded by contract today: AuroraLedgerRequestSchema has no paging shape
+ * (Task 2), and silently truncating a financial ledger would be worse than
+ * an honest full read. Pagination must be a conscious contract change before
+ * Task 6 UI drives real volume.
+ */
 export async function listAuroraLedgerEntries(
   db: AuroraDatabase,
   accountId: string,
@@ -326,6 +362,10 @@ export async function rebuildWalletsFromLedger(db: AuroraDatabase): Promise<void
           wallet.reserved -= cents;
           wallet.available += cents;
           break;
+        default:
+          // A replay that meets an unknown kind must fail loudly; silently
+          // skipping it would compute wrong balances with no error.
+          throw new Error(`Ledger replay encountered unknown entry kind: ${row.kind}`);
       }
     }
     await client.query('DELETE FROM wallets');

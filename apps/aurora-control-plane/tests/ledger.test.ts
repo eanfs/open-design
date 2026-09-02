@@ -217,6 +217,87 @@ describe('Aurora credit ledger', () => {
     });
   });
 
+  it('handles fractional credit amounts exactly through the full lifecycle', async () => {
+    const account = await createAccount();
+    const ledger = createAuroraLedgerService(pool);
+    await fundWallet(account.accountId, '10.00');
+
+    await ledger.reserveCredits(account.accountId, 'run:frac-1', '4.50');
+    expect(await readWalletRow(pool, account.accountId)).toEqual({
+      availableCredits: '5.50',
+      reservedCredits: '4.50',
+    });
+
+    await ledger.settleReservation('run:frac-1');
+    expect(await readWalletRow(pool, account.accountId)).toEqual({
+      availableCredits: '5.50',
+      reservedCredits: '0.00',
+    });
+
+    await ledger.reserveCredits(account.accountId, 'run:frac-2', '0.99');
+    expect(await readWalletRow(pool, account.accountId)).toEqual({
+      availableCredits: '4.51',
+      reservedCredits: '0.99',
+    });
+
+    await ledger.releaseReservation('run:frac-2');
+    expect(await readWalletRow(pool, account.accountId)).toEqual({
+      availableCredits: '5.50',
+      reservedCredits: '0.00',
+    });
+  });
+
+  it('lets exactly one of concurrent settle and release win', async () => {
+    const account = await createAccount();
+    const ledger = createAuroraLedgerService(pool);
+    await fundWallet(account.accountId, '10.00');
+    await ledger.reserveCredits(account.accountId, 'run:race', '4.00');
+
+    const results = await Promise.allSettled([
+      ledger.settleReservation('run:race'),
+      ledger.releaseReservation('run:race'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const loser = results.find((result) => result.status === 'rejected') as
+      | PromiseRejectedResult
+      | undefined;
+    expect(loser?.reason).toBeInstanceOf(AuroraLedgerError);
+    expect((loser?.reason as AuroraLedgerError).code).toBe('aurora_reservation_closed');
+  });
+
+  it('keeps reservation keys globally unique across accounts', async () => {
+    const first = await createAccount();
+    const second = await createAccount();
+    const ledger = createAuroraLedgerService(pool);
+    await fundWallet(first.accountId, '10.00');
+    await fundWallet(second.accountId, '10.00');
+
+    await ledger.reserveCredits(first.accountId, 'run:shared', '1.00');
+    await expect(
+      ledger.reserveCredits(second.accountId, 'run:shared', '1.00'),
+    ).rejects.toMatchObject({ code: 'aurora_reservation_conflict', status: 409 });
+  });
+
+  it('rejects amounts beyond the NUMERIC(12,2) storage bound', async () => {
+    const account = await createAccount();
+    const ledger = createAuroraLedgerService(pool);
+
+    await expect(
+      ledger.reserveCredits(account.accountId, 'run:overflow', '99999999999.00'),
+    ).rejects.toThrow();
+    expect(await readWalletRow(pool, account.accountId)).toEqual({
+      availableCredits: '0.00',
+      reservedCredits: '0.00',
+    });
+  });
+
+  it('maps reservations for unknown accounts to a typed commerce error', async () => {
+    const ledger = createAuroraLedgerService(pool);
+    await expect(
+      ledger.reserveCredits('acct_does_not_exist', 'run:ghost', '1.00'),
+    ).rejects.toMatchObject({ code: 'aurora_account_not_found', status: 409 });
+  });
+
   it('rejects non-positive and malformed amounts', async () => {
     const account = await createAccount();
     const ledger = createAuroraLedgerService(pool);
