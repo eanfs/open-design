@@ -10,6 +10,7 @@ import {
   withAuroraTransaction,
   type AuroraAppDeps,
 } from '../src/server.js';
+import type { AuroraConfig } from '../src/config.js';
 
 async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -45,12 +46,24 @@ function createFakeDatabase(options?: {
   return { client, pool, query, release };
 }
 
+function createTestAuroraConfig(): AuroraConfig {
+  return {
+    host: '127.0.0.1',
+    port: 0,
+    publicOrigin: 'http://127.0.0.1:0',
+    oidc: { issuer: 'https://issuer.example.com', clientId: 'aurora-web', clientSecret: 'secret' },
+    sessionTtlSeconds: 3600,
+    loginStateTtlSeconds: 600,
+    loginStateSigningSecret: 'test-signing-secret',
+  };
+}
+
 describe('Aurora control-plane app', () => {
   it('constructs an Express app only from explicit dependencies', () => {
     const { pool } = createFakeDatabase();
     const deps = {
       db: pool,
-      config: { host: '127.0.0.1', port: 0 },
+      config: createTestAuroraConfig(),
     } satisfies AuroraAppDeps;
 
     const app = createAuroraApp(deps);
@@ -63,7 +76,7 @@ describe('Aurora control-plane app', () => {
     const { pool } = createFakeDatabase();
     const server = await startAuroraServer({
       db: pool,
-      config: { host: '127.0.0.1', port: 0 },
+      config: createTestAuroraConfig(),
     });
 
     try {
