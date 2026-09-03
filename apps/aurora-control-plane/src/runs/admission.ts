@@ -147,6 +147,40 @@ async function deleteUnlinkedRunCharge(
   );
 }
 
+async function ledgerReservationExists(
+  db: AuroraDatabase,
+  reservationKey: string,
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT 1 FROM ledger_entries
+     WHERE reservation_key = $1 AND kind = 'reservation'`,
+    [reservationKey],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function reserveOrReject(
+  db: AuroraDatabase,
+  accountId: string,
+  clientRequestId: string,
+  reservationKey: string,
+  amount: string,
+): Promise<RunAdmissionResult | null> {
+  try {
+    await createAuroraLedgerService(db).reserveCredits(
+      accountId,
+      reservationKey,
+      amount,
+    );
+    return null;
+  } catch (error) {
+    await deleteUnlinkedRunCharge(db, accountId, clientRequestId);
+    if (error instanceof AuroraLedgerError) {
+      return admissionRejection(error.status, error.code, error.message);
+    }
+    throw error;
+  }
+}
 /**
  * Admit one paid run: authenticate is already done by the route, so this
  * validates the body, resolves the fixed price server-side, claims the unique
@@ -213,19 +247,24 @@ export async function admitPaidRun(
     return { status: 201, body: { runId: charge.runId } };
   }
 
-  if (charge.created) {
-    try {
-      await createAuroraLedgerService(deps.db).reserveCredits(
-        accountId,
-        runChargeReservationKey(accountId, clientRequestId),
-        AURORA_RUN_PRICING.amount,
-      );
-    } catch (error) {
-      await deleteUnlinkedRunCharge(deps.db, accountId, clientRequestId);
-      if (error instanceof AuroraLedgerError) {
-        return admissionRejection(error.status, error.code, error.message);
-      }
-      throw error;
+  const reservationKey = runChargeReservationKey(accountId, clientRequestId);
+  // A fresh charge reserves here; a replayed charge normally already carries
+  // its reservation. The exception is the crash window between the RunCharge
+  // commit and the ledger reservation, which would otherwise let an identical
+  // retry reach upstream without ever charging the wallet.
+  const reservationMissing =
+    charge.created ||
+    (charge.runId === null && !(await ledgerReservationExists(deps.db, reservationKey)));
+  if (reservationMissing) {
+    const rejection = await reserveOrReject(
+      deps.db,
+      accountId,
+      clientRequestId,
+      reservationKey,
+      AURORA_RUN_PRICING.amount,
+    );
+    if (rejection !== null) {
+      return rejection;
     }
   }
 

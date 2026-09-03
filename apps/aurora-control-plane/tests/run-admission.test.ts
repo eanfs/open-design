@@ -148,6 +148,7 @@ describe('Aurora paid run admission', () => {
   let brokeCookie: string;
   let otherCookie: string;
   let admittedRunId: string;
+  let store: ReturnType<typeof createAuroraSessionStore>;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine')
@@ -196,7 +197,7 @@ describe('Aurora paid run admission', () => {
     appServer = createAuroraApp({ db: pool, config }).listen(config.port, config.host);
     await new Promise<void>((resolve) => appServer.once('listening', resolve));
 
-    const store = createAuroraSessionStore(pool, { ttlSeconds: config.sessionTtlSeconds });
+    store = createAuroraSessionStore(pool, { ttlSeconds: config.sessionTtlSeconds });
     const nullTokens = {
       accessToken: null,
       refreshToken: null,
@@ -471,6 +472,64 @@ describe('Aurora paid run admission', () => {
     const recoveredCharge = await runCharge(richAccount.accountId, 'req-lost');
     expect(recoveredCharge!.run_id).toBe(payload.runId);
     expect(payload.reused).toBe(true);
+  });
+
+  it('repairs a run charge whose credit reservation never landed (crash window)', async () => {
+    // Dedicated account so the wallet assertions do not depend on the credit
+    // spend of earlier tests in this file.
+    const orphanPrincipal = await upsertAuroraAccount(pool, {
+      issuer: 'https://aurora-oidc.invalid',
+      subject: 'run-user-orphan',
+      email: 'run-user-orphan@example.com',
+      displayName: 'run-user-orphan',
+    });
+    const nullTokens = {
+      accessToken: null,
+      refreshToken: null,
+      idToken: null,
+      expiresAt: null,
+    };
+    const orphanCookie = await store.create(orphanPrincipal, nullTokens);
+    await withAuroraTransaction(pool, (client) =>
+      applyAuroraTopup(client, orphanPrincipal.accountId, '10.00'),
+    );
+
+    const body = {
+      clientRequestId: 'req-orphan',
+      message: 'Run after a crash',
+      currentPrompt: 'Run after a crash',
+    };
+    // Simulate the crash window between the RunCharge commit and the ledger
+    // reservation: insert the charge row by hand and never reserve credits.
+    const outgoingDigest = createHash('sha256')
+      .update(JSON.stringify({ ...body, agentId: RUN_AGENT_ID }))
+      .digest('hex');
+    await pool.query(
+      `INSERT INTO run_charges
+         (account_id, client_request_id, pricing_version, amount, body_digest, state)
+       VALUES ($1, $2, $3, $4, $5, 'reserved')`,
+      [orphanPrincipal.accountId, body.clientRequestId, RUN_PRICING_VERSION, RUN_PRICE_AMOUNT, outgoingDigest],
+    );
+
+    const response = await createPaidRun(body, orphanCookie);
+    expect(response.status).toBe(201);
+    const payload = (await response.json()) as { runId: string };
+    expect(payload.runId).toMatch(/^run-/u);
+
+    // The missing reservation must be backfilled before the upstream call.
+    const reservation = await pool.query(
+      `SELECT 1 FROM ledger_entries
+       WHERE reservation_key = $1 AND kind = 'reservation'`,
+      [`run-charge:${orphanPrincipal.accountId}:${body.clientRequestId}`],
+    );
+    expect(reservation.rowCount).toBe(1);
+    expect(await walletOf(orphanPrincipal.accountId)).toEqual({
+      availableCredits: '9.50',
+      reservedCredits: '0.50',
+    });
+    const charge = await runCharge(orphanPrincipal.accountId, body.clientRequestId);
+    expect(charge!.run_id).toBe(payload.runId);
+    expect(fakeUpstream.requestsFor(body.clientRequestId).length).toBe(1);
   });
 
   it('isolates clientRequestId idempotency per account', async () => {
