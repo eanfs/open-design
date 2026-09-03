@@ -287,6 +287,7 @@ describe('Aurora OIDC sessions', () => {
       sessionTtlSeconds: 3600,
       loginStateTtlSeconds: 600,
       loginStateSigningSecret: 'test-signing-secret',
+      stripe: { secretKey: 'sk_test_aurora', webhookSecret: 'whsec_test_aurora' },
     };
     appServer = await listenApp(pool, baseConfig);
   });

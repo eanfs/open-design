@@ -233,8 +233,28 @@ async function closeReservation(
   });
 }
 
-export function createAuroraLedgerService(db: AuroraDatabase): LedgerService {
-  return {
+/**
+ * Grant a top-up inside a caller-owned transaction. Exported for the Stripe
+ * webhook path, which must apply the event-id insert and the credit grant
+ * atomically; balance transactions must never open their own transaction.
+ */
+export async function applyAuroraTopup(
+  client: PoolClient,
+  accountId: string,
+  amount: string,
+): Promise<void> {
+  const cents = requirePositiveAmount(amount);
+  await ensureWalletRow(client, accountId);
+  await appendLedgerEntry(client, {
+    accountId,
+    kind: 'topup',
+    amountCents: cents,
+    reservationKey: null,
+  });
+  await applyWalletDelta(client, accountId, { availableCents: cents, reservedCents: 0n });
+}
+
+export function createAuroraLedgerService(db: AuroraDatabase): LedgerService {  return {
     reserveCredits: async (accountId, reservationKey, amount) => {
       const cents = requirePositiveAmount(amount);
       await withAuroraTransaction(db, async (client) => {

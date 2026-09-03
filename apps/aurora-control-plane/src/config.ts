@@ -10,6 +10,20 @@ export interface AuroraOidcConfig {
   readonly allowInsecureHttp?: boolean;
 }
 
+export interface AuroraStripeConfig {
+  readonly secretKey: string;
+  /** Signing secret for `POST /api/aurora/webhooks/stripe` deliveries. */
+  readonly webhookSecret: string;
+  /**
+   * Test-only escape hatch that points the Stripe client at a local fake.
+   * Production must leave these unset so the official `https://api.stripe.com`
+   * endpoint is used.
+   */
+  readonly apiProtocol?: 'http' | 'https';
+  readonly apiHost?: string;
+  readonly apiPort?: number;
+}
+
 export interface AuroraConfig {
   readonly host: string;
   readonly port: number;
@@ -20,4 +34,5 @@ export interface AuroraConfig {
   readonly loginStateTtlSeconds: number;
   /** HMAC key protecting the short-lived OIDC login-state cookie. */
   readonly loginStateSigningSecret: string;
+  readonly stripe: AuroraStripeConfig;
 }

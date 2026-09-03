@@ -67,9 +67,7 @@ describe('Aurora credit ledger', () => {
       .withStartupTimeout(120_000)
       .start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
-    // 002-commerce.sql stays reserved for Task 4 (Stripe commerce); the ledger
-    // tests only need the auth tables plus the credit schema.
-    for (const file of ['001-auth.sql', '003-ledger.sql']) {
+    for (const file of ['001-auth.sql', '002-commerce.sql', '003-ledger.sql']) {
       const migration = await readFile(new URL(`../src/migrations/${file}`, import.meta.url), 'utf8');
       await pool.query(migration);
     }
@@ -87,6 +85,7 @@ describe('Aurora credit ledger', () => {
       sessionTtlSeconds: 3600,
       loginStateTtlSeconds: 600,
       loginStateSigningSecret: 'test-signing-secret',
+      stripe: { secretKey: 'sk_test_aurora', webhookSecret: 'whsec_test_aurora' },
     };
     appServer = createAuroraApp({ db: pool, config }).listen(config.port, config.host);
     await new Promise<void>((resolve) => appServer.once('listening', resolve));
@@ -108,7 +107,7 @@ describe('Aurora credit ledger', () => {
     });
   }
 
-  /** Test-only funding that mirrors what the Task 4 Stripe webhook will do. */
+  /** Test-only funding that mirrors what the Stripe webhook grants. */
   async function fundWallet(accountId: string, amount: string): Promise<void> {
     await pool.query(
       `INSERT INTO ledger_entries (account_id, kind, direction, amount)
