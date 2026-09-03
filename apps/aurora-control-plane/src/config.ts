@@ -24,6 +24,11 @@ export interface AuroraStripeConfig {
   readonly apiPort?: number;
 }
 
+export interface AuroraRunsConfig {
+  /** Base URL of the tenant's OpenDesign instance that admitted runs target. */
+  readonly upstreamBaseUrl: string;
+}
+
 export interface AuroraConfig {
   readonly host: string;
   readonly port: number;
@@ -35,4 +40,10 @@ export interface AuroraConfig {
   /** HMAC key protecting the short-lived OIDC login-state cookie. */
   readonly loginStateSigningSecret: string;
   readonly stripe: AuroraStripeConfig;
+  /**
+   * Paid-run admission target; present only on control planes that admit
+   * runs. The fixed run price itself lives in `runs/admission.ts` as the
+   * single versioned server-side constant.
+   */
+  readonly runs?: AuroraRunsConfig;
 }
