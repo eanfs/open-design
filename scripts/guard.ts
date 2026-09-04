@@ -52,6 +52,10 @@ const residualSkippedDirectories = new Set([
   ".opencode",
   // Local agent deepwork/worktree scratch (git-ignored; not product source).
   ".slim",
+  ".superpowers",
+  ".ua",
+  ".worktree",
+  ".worktrees",
   ".task",
   ".tmp",
   ".vite",

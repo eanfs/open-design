@@ -11,10 +11,10 @@ import {
   beginAuroraLogin,
   completeAuroraLogin,
 } from '../auth/oidc.js';
+import { readAuroraCookie, resolveAuroraSession } from '../auth/resolve-session.js';
 import {
   createAuroraSessionStore,
   upsertAuroraAccount,
-  type AuroraPrincipal,
   type AuroraSessionStore,
 } from '../auth/session-store.js';
 import type { AuroraConfig } from '../config.js';
@@ -27,23 +27,6 @@ export interface SessionRouterDeps {
 
 /** Cookie attributes required for the `__Host-` prefix and session safety. */
 const SESSION_COOKIE_ATTRIBUTES = 'Path=/; Secure; HttpOnly; SameSite=Lax';
-
-function readCookie(headerValue: string | undefined, name: string): string | undefined {
-  if (headerValue === undefined) return undefined;
-  for (const part of headerValue.split(';')) {
-    const trimmed = part.trim();
-    if (!trimmed.startsWith(`${name}=`)) continue;
-    const raw = trimmed.slice(name.length + 1);
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      // A hostile cookie value that is not valid percent-encoding is treated
-      // as absent rather than crashing the request with a URIError.
-      return undefined;
-    }
-  }
-  return undefined;
-}
 
 function serializeCookie(name: string, value: string | null, maxAgeSeconds: number): string {
   const cookieValue = value === null ? '' : value;
@@ -64,18 +47,10 @@ function oidcRejection(error: unknown): { code: string; message: string } {
   };
 }
 
-async function resolvePrincipal(
-  store: AuroraSessionStore,
-  request: Request,
-): Promise<AuroraPrincipal | null> {
-  const token = readCookie(request.headers.cookie, AURORA_SESSION_COOKIE_NAME);
-  return token === undefined ? null : await store.get(token);
-}
-
 /** Resolve the session cookie into a principal or reject with a 401 commerce error. */
 export function requireAuroraSession(store: AuroraSessionStore): RequestHandler {
   return async (request: Request, response, next) => {
-    const principal = await resolvePrincipal(store, request);
+    const principal = await resolveAuroraSession(store, request);
     if (principal === null) {
       response.status(401).json({
         code: 'aurora_unauthenticated',
@@ -96,7 +71,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
   router.use(requireSameOriginForMutations(deps.config.publicOrigin));
 
   router.get('/session', async (request, response) => {
-    const principal = await resolvePrincipal(store, request);
+    const principal = await resolveAuroraSession(store, request);
     response.json(
       AuroraSessionSchema.parse({
         authenticated: principal !== null,
@@ -129,7 +104,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
   router.get('/callback', async (request, response) => {
     let identity;
     try {
-      const loginCookie = readCookie(request.headers.cookie, AURORA_LOGIN_COOKIE_NAME);
+      const loginCookie = readAuroraCookie(request.headers.cookie, AURORA_LOGIN_COOKIE_NAME);
       const callbackUrl = new URL(`${deps.config.publicOrigin}${request.originalUrl}`);
       identity = await completeAuroraLogin(deps.config, callbackUrl, loginCookie);
     } catch (error) {
@@ -159,7 +134,7 @@ export function createSessionRouter(deps: SessionRouterDeps): Router {
   });
 
   router.post('/logout', async (request, response) => {
-    const token = readCookie(request.headers.cookie, AURORA_SESSION_COOKIE_NAME);
+    const token = readAuroraCookie(request.headers.cookie, AURORA_SESSION_COOKIE_NAME);
     if (token !== undefined) {
       await store.delete(token);
     }
