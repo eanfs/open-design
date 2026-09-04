@@ -186,50 +186,58 @@ async function appendLedgerEntry(
   );
 }
 
-async function closeReservation(
-  db: AuroraDatabase,
+/**
+ * Close a reservation inside a caller-owned transaction, so the ledger close
+ * and any caller-owned state transition commit atomically. Balance
+ * transactions must never open their own transaction; the ledger service
+ * methods wrap this in one, and Task 7 run reconciliation passes its own
+ * transaction client so the run-charge state flip cannot tear apart from
+ * the ledger close.
+ *
+ * Locking the reservation row serializes competing settle/release attempts;
+ * a second close of the same reservation fails with a typed closed error.
+ */
+export async function closeAuroraReservation(
+  client: PoolClient,
   reservationKey: string,
   kind: 'settlement' | 'release',
 ): Promise<void> {
-  await withAuroraTransaction(db, async (client) => {
-    // Locking the reservation row serializes competing settle/release attempts.
-    const reservation = await client.query<{ account_id: string; amount: string }>(
-      `SELECT account_id, amount FROM ledger_entries
-       WHERE reservation_key = $1 AND kind = 'reservation'
-       FOR UPDATE`,
-      [reservationKey],
+  const reservation = await client.query<{ account_id: string; amount: string }>(
+    `SELECT account_id, amount FROM ledger_entries
+     WHERE reservation_key = $1 AND kind = 'reservation'
+     FOR UPDATE`,
+    [reservationKey],
+  );
+  const row = reservation.rows[0];
+  if (row === undefined) {
+    throw new AuroraLedgerError(
+      'aurora_reservation_not_found',
+      `No reservation exists for key ${reservationKey}`,
+      409,
     );
-    const row = reservation.rows[0];
-    if (row === undefined) {
-      throw new AuroraLedgerError(
-        'aurora_reservation_not_found',
-        `No reservation exists for key ${reservationKey}`,
-        409,
-      );
-    }
-    const closed = await client.query(
-      `SELECT 1 FROM ledger_entries
-       WHERE reservation_key = $1 AND kind IN ('settlement', 'release')`,
-      [reservationKey],
+  }
+  const closed = await client.query(
+    `SELECT 1 FROM ledger_entries
+     WHERE reservation_key = $1 AND kind IN ('settlement', 'release')`,
+    [reservationKey],
+  );
+  if ((closed.rowCount ?? 0) > 0) {
+    throw new AuroraLedgerError(
+      'aurora_reservation_closed',
+      `Reservation ${reservationKey} is already settled or released`,
+      409,
     );
-    if ((closed.rowCount ?? 0) > 0) {
-      throw new AuroraLedgerError(
-        'aurora_reservation_closed',
-        `Reservation ${reservationKey} is already settled or released`,
-        409,
-      );
-    }
-    const cents = toCents(row.amount);
-    await appendLedgerEntry(client, {
-      accountId: row.account_id,
-      kind,
-      amountCents: cents,
-      reservationKey,
-    });
-    await applyWalletDelta(client, row.account_id, {
-      availableCents: kind === 'release' ? cents : 0n,
-      reservedCents: -cents,
-    });
+  }
+  const cents = toCents(row.amount);
+  await appendLedgerEntry(client, {
+    accountId: row.account_id,
+    kind,
+    amountCents: cents,
+    reservationKey,
+  });
+  await applyWalletDelta(client, row.account_id, {
+    availableCents: kind === 'release' ? cents : 0n,
+    reservedCents: -cents,
   });
 }
 
@@ -291,9 +299,11 @@ export function createAuroraLedgerService(db: AuroraDatabase): LedgerService {  
       });
     },
 
-    settleReservation: (reservationKey) => closeReservation(db, reservationKey, 'settlement'),
+    settleReservation: (reservationKey) =>
+      withAuroraTransaction(db, (client) => closeAuroraReservation(client, reservationKey, 'settlement')),
 
-    releaseReservation: (reservationKey) => closeReservation(db, reservationKey, 'release'),
+    releaseReservation: (reservationKey) =>
+      withAuroraTransaction(db, (client) => closeAuroraReservation(client, reservationKey, 'release')),
   };
 }
 

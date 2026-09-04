@@ -1,12 +1,27 @@
 import type { Server } from 'node:http';
 
 import { createAuroraApp, type AuroraAppDeps } from './app.js';
+import {
+  DEFAULT_RECONCILE_INTERVAL_MS,
+  startRunReconciliationScheduler,
+  type RunReconciliationScheduler,
+} from './runs/reconciler.js';
+import { createTenantRouteStore } from './tenants/routes.js';
 
+/**
+ * Start the Aurora control plane: the Express app plus, when paid-run
+ * admission is configured, the reserved-charge reconciliation scheduler.
+ * The scheduler polls each tenant's OpenDesign upstream (resolved from the
+ * tenant route store) on the configured interval until the server closes —
+ * or the process exits, since its timer is unref'd and never keeps the
+ * process alive by itself.
+ */
 export async function startAuroraServer(deps: AuroraAppDeps): Promise<Server> {
   const app = createAuroraApp(deps);
 
   return await new Promise<Server>((resolve, reject) => {
     const server = app.listen(deps.config.port, deps.config.host);
+    let scheduler: RunReconciliationScheduler | null = null;
 
     const cleanup = (): void => {
       server.off('error', onError);
@@ -18,6 +33,15 @@ export async function startAuroraServer(deps: AuroraAppDeps): Promise<Server> {
     };
     const onListening = (): void => {
       cleanup();
+      const runs = deps.config.runs;
+      if (runs !== undefined) {
+        scheduler = startRunReconciliationScheduler({
+          db: deps.db,
+          tenants: createTenantRouteStore(deps.db),
+          intervalMs: runs.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS,
+        });
+        server.once('close', () => scheduler?.stop());
+      }
       resolve(server);
     };
 

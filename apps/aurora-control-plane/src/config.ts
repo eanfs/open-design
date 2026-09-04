@@ -24,6 +24,14 @@ export interface AuroraStripeConfig {
   readonly apiPort?: number;
 }
 
+export interface AuroraRunsConfig {
+  /**
+   * Poll cadence for settlement reconciliation of reserved run charges.
+   * Falls back to the reconciler default when unset.
+   */
+  readonly reconcileIntervalMs?: number;
+}
+
 export interface AuroraConfig {
   readonly host: string;
   readonly port: number;
@@ -35,4 +43,11 @@ export interface AuroraConfig {
   /** HMAC key protecting the short-lived OIDC login-state cookie. */
   readonly loginStateSigningSecret: string;
   readonly stripe: AuroraStripeConfig;
+  /**
+   * Paid-run surface tuning; present only on control planes that admit runs.
+   * The upstream each admitted run targets is resolved per tenant from
+   * `tenant_routes` (Task 8), never from config. The fixed run price itself
+   * lives in `runs/admission.ts` as the single versioned server-side constant.
+   */
+  readonly runs?: AuroraRunsConfig;
 }
