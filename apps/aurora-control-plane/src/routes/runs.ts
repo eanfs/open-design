@@ -51,6 +51,11 @@ export function createRunsRouter(deps: RunsRouterDeps): Router {
       principal.accountId,
       request.body,
     );
+    // Commerce rejections (401/402/409) are schema-valid by construction in
+    // the admission service; every other status carries the upstream's own
+    // body verbatim, which may coincidentally share a status code (e.g. an
+    // upstream 409) without being an Aurora commerce error. The body is
+    // therefore never reinterpreted here.
     response.status(result.status).json(result.body);
   });
 

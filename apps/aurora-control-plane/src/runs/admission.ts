@@ -1,7 +1,9 @@
 import type { PoolClient } from 'pg';
 
+import { toAuroraCommerceErrorBody } from '../commerce/errors.js';
 import {
   AuroraLedgerError,
+  closeAuroraReservation,
   createAuroraLedgerService,
 } from '../commerce/ledger.js';
 import { withAuroraTransaction, type AuroraDatabase } from '../db.js';
@@ -68,6 +70,22 @@ function toRunCharge(row: RunChargeRow): RunCharge {
 }
 
 /**
+ * Reserved charges that carry an upstream run id: the only charges the
+ * reconciliation pass can settle or release, because only they have a run
+ * whose status can be polled. Reservations without a run id (a lost creation
+ * response) are recovered by the client's identical replay instead.
+ */
+export async function listReservedRunCharges(db: AuroraDatabase): Promise<RunCharge[]> {
+  const result = await db.query<RunChargeRow>(
+    `SELECT account_id, client_request_id, pricing_version, amount, body_digest, state, run_id
+     FROM run_charges
+     WHERE state = 'reserved' AND run_id IS NOT NULL
+     ORDER BY created_at`,
+  );
+  return result.rows.map(toRunCharge);
+}
+
+/**
  * The ledger reservation is keyed by the run charge identity, so a charge and
  * its credit reservation can never drift apart across replays.
  */
@@ -76,7 +94,59 @@ export function runChargeReservationKey(accountId: string, clientRequestId: stri
 }
 
 function admissionRejection(status: 402 | 409, code: string, message: string): RunAdmissionResult {
-  return { status, body: { code, message, status } };
+  return { status, body: toAuroraCommerceErrorBody(status, code, message) };
+}
+
+/**
+ * A 4xx that is not 408/429 states deterministically that the upstream never
+ * started this run: the same bytes will be rejected the same way forever, so
+ * holding the reservation for a reconciliation pass that can never settle it
+ * would tie up credits indefinitely. Every uncertain outcome — network loss,
+ * 5xx, 408, 429 — stays reserved: the run may exist and its identical replay
+ * must recover it (Task 6), or reconciliation settles/releases it later.
+ */
+function isDeterministicClientError(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+/**
+ * Release the reservation of a charge whose run was deterministically
+ * rejected upstream, atomically with the charge state flip. The ledger
+ * reservation may legitimately be missing when the charge row itself was
+ * never linked (the reservationMissing repair only runs before upstream
+ * contact), so that drift deletes the row and keeps the identity retryable.
+ */
+async function releaseRejectedRunCharge(
+  db: AuroraDatabase,
+  accountId: string,
+  clientRequestId: string,
+  reservationKey: string,
+): Promise<void> {
+  try {
+    await withAuroraTransaction(db, async (client) => {
+      const current = await client.query<{ state: string }>(
+        `SELECT state FROM run_charges
+         WHERE account_id = $1 AND client_request_id = $2
+         FOR UPDATE`,
+        [accountId, clientRequestId],
+      );
+      if (current.rows[0]?.state !== 'reserved') {
+        return;
+      }
+      await closeAuroraReservation(client, reservationKey, 'release');
+      await client.query(
+        `UPDATE run_charges SET state = 'released', updated_at = now()
+         WHERE account_id = $1 AND client_request_id = $2 AND state = 'reserved'`,
+        [accountId, clientRequestId],
+      );
+    });
+  } catch (error) {
+    if (error instanceof AuroraLedgerError && error.code === 'aurora_reservation_not_found') {
+      await deleteUnlinkedRunCharge(db, accountId, clientRequestId);
+      return;
+    }
+    throw error;
+  }
 }
 
 const UPSTREAM_UNAVAILABLE = { status: 502, body: { error: 'aurora_upstream_unavailable' } };
@@ -191,6 +261,14 @@ async function reserveOrReject(
  * replays the existing run id (or retries the unresolved upstream creation);
  * a different digest is a 409 conflict. A lost upstream response keeps the
  * reservation reserved so the identical retry can recover the same run.
+ *
+ * Terminal rejections differ by outcome certainty: a deterministic
+ * client-error response (4xx except 408/429) proves the upstream never
+ * started the run, so the reservation is released immediately and the
+ * released identity is closed — an identical replay answers a typed 409
+ * instead of re-reserving or re-contacting the upstream. Uncertain outcomes
+ * (network loss, 5xx, 408, 429) stay reserved for reconciliation (Task 7)
+ * or the identical retry to resolve.
  */
 export async function admitPaidRun(
   deps: AuroraRunAdmissionDeps,
@@ -243,8 +321,25 @@ export async function admitPaidRun(
       `clientRequestId ${clientRequestId} is already bound to a different run body`,
     );
   }
+  // A charge that ever reached the upstream keeps Task 6's replay contract
+  // in every state, released included: the identity is bound to a real run,
+  // so an identical replay answers 201 with that run id and neither
+  // re-reserves credits nor contacts the upstream again. The run's own
+  // status (failed/canceled) is what the caller observes next.
   if (charge.runId !== null) {
     return { status: 201, body: { runId: charge.runId } };
+  }
+  if (charge.state === 'released') {
+    // A released, runless identity never re-enters admission: its body was
+    // rejected deterministically, so an identical replay must not re-reserve
+    // credits or re-contact the upstream (which could now accept the body
+    // and start an uncharged run). Retrying means submitting a fresh
+    // clientRequestId.
+    return admissionRejection(
+      409,
+      'aurora_run_request_closed',
+      `clientRequestId ${clientRequestId} was already released after a deterministic upstream rejection; submit a fresh clientRequestId to retry`,
+    );
   }
 
   const reservationKey = runChargeReservationKey(accountId, clientRequestId);
@@ -279,8 +374,18 @@ export async function admitPaidRun(
     return UPSTREAM_UNAVAILABLE;
   }
   if (outcome.status < 200 || outcome.status >= 300) {
-    // Structured upstream failure: forward it unchanged; the reservation
-    // stays reserved for the reconciliation pass to settle or release.
+    // Structured upstream failure: forward it unchanged. Deterministic
+    // client errors release the reservation immediately (nothing to
+    // reconcile later); uncertain outcomes (5xx, 408/429) stay reserved for
+    // the reconciliation pass or an identical replay to resolve.
+    if (isDeterministicClientError(outcome.status)) {
+      await releaseRejectedRunCharge(
+        deps.db,
+        accountId,
+        clientRequestId,
+        reservationKey,
+      );
+    }
     return { status: outcome.status, body: upstreamBody };
   }
   const runId = (upstreamBody as Record<string, unknown> | null)?.runId;

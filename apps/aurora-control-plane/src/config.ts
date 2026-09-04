@@ -27,6 +27,11 @@ export interface AuroraStripeConfig {
 export interface AuroraRunsConfig {
   /** Base URL of the tenant's OpenDesign instance that admitted runs target. */
   readonly upstreamBaseUrl: string;
+  /**
+   * Poll cadence for settlement reconciliation of reserved run charges.
+   * Falls back to the reconciler default when unset.
+   */
+  readonly reconcileIntervalMs?: number;
 }
 
 export interface AuroraConfig {

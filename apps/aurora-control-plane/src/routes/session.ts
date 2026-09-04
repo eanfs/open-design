@@ -17,6 +17,7 @@ import {
   type AuroraPrincipal,
   type AuroraSessionStore,
 } from '../auth/session-store.js';
+import { toAuroraCommerceErrorBody } from '../commerce/errors.js';
 import type { AuroraConfig } from '../config.js';
 import type { AuroraDatabase } from '../db.js';
 
@@ -77,11 +78,13 @@ export function requireAuroraSession(store: AuroraSessionStore): RequestHandler 
   return async (request: Request, response, next) => {
     const principal = await resolvePrincipal(store, request);
     if (principal === null) {
-      response.status(401).json({
-        code: 'aurora_unauthenticated',
-        message: 'An authenticated Aurora session is required',
-        status: 401,
-      });
+      response.status(401).json(
+        toAuroraCommerceErrorBody(
+          401,
+          'aurora_unauthenticated',
+          'An authenticated Aurora session is required',
+        ),
+      );
       return;
     }
     response.locals.auroraPrincipal = principal;
