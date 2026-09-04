@@ -7,7 +7,7 @@ import {
   createAuroraLedgerService,
 } from '../commerce/ledger.js';
 import { withAuroraTransaction, type AuroraDatabase } from '../db.js';
-import { digestAuroraRunBody, type OpenDesignUpstream } from './upstream.js';
+import { AURORA_RUN_AGENT_ID, digestAuroraRunBody, type OpenDesignUpstream } from './upstream.js';
 
 /**
  * The single versioned fixed price for every paid run. It exists only here,
@@ -271,11 +271,19 @@ export async function admitPaidRun(
       'A non-empty clientRequestId is required before any credits are reserved',
     );
   }
-  // The body travels byte-for-byte as serialized here, unchanged: Aurora does
-  // not restrict which agent provider a tenant's OpenDesign instance admits,
-  // so an explicit agentId passes through and an omitted one stays omitted.
-  // Identical input bodies always produce identical outgoing bytes.
-  const outgoingBody = JSON.stringify(record);
+  // DSH-only admission (issue #13): paid runs only admit the deepseek-harness
+  // runtime. An explicit other agent is rejected before any credits are
+  // reserved; an omitted agentId is filled with the single admitted runtime.
+  // Everything except agentId travels byte-for-byte as serialized here, and
+  // identical input bodies always produce identical outgoing bytes.
+  if (record.agentId !== undefined && record.agentId !== AURORA_RUN_AGENT_ID) {
+    return admissionRejection(
+      409,
+      'aurora_agent_not_supported',
+      `Paid runs only admit the ${AURORA_RUN_AGENT_ID} runtime`,
+    );
+  }
+  const outgoingBody = JSON.stringify({ ...record, agentId: AURORA_RUN_AGENT_ID });
   const bodyDigest = digestAuroraRunBody(outgoingBody);
 
   const charge = await withAuroraTransaction(deps.db, (client) =>

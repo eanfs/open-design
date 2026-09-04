@@ -22,6 +22,7 @@ import type { AuroraConfig } from '../src/config.js';
 const SESSION_COOKIE = '__Host-aurora_session';
 const RUN_PRICE_AMOUNT = '0.50';
 const RUN_PRICING_VERSION = '2026-09';
+const RUN_AGENT_ID = 'deepseek-harness';
 
 // The fixed run price is server-owned configuration; these literals pin the
 // versioned price the admission route must charge for every run shape.
@@ -306,12 +307,10 @@ describe('Aurora paid run admission', () => {
     const [upstream] = fakeUpstream.requestsFor('req-1');
     expect(upstream!.body).toMatchObject({
       clientRequestId: 'req-1',
+      agentId: RUN_AGENT_ID,
       message: 'Design a poster',
       currentPrompt: 'Design a poster',
     });
-    // No agent is injected: an omitted agentId stays omitted so the tenant's
-    // OpenDesign instance picks its own provider.
-    expect(upstream!.body).not.toHaveProperty('agentId');
 
     const charge = await runCharge(richAccount.accountId, 'req-1');
     expect(charge).toMatchObject({
@@ -347,7 +346,7 @@ describe('Aurora paid run admission', () => {
     });
   });
 
-  it('passes zero, one, and many skills through unchanged without injecting an agent', async () => {
+  it('passes zero, one, and many skills through unchanged with the DSH agent filled in', async () => {
     const oneSkill = await createPaidRun({
       clientRequestId: 'req-skill-1',
       skillId: 'poster-kit',
@@ -364,26 +363,30 @@ describe('Aurora paid run admission', () => {
     expect(manySkills.status).toBe(201);
 
     const [oneSkillUpstream] = fakeUpstream.requestsFor('req-skill-1');
-    expect(oneSkillUpstream!.body).toMatchObject({ skillId: 'poster-kit' });
-    expect(oneSkillUpstream!.body).not.toHaveProperty('agentId');
+    expect(oneSkillUpstream!.body).toMatchObject({
+      skillId: 'poster-kit',
+      agentId: RUN_AGENT_ID,
+    });
     const [manySkillsUpstream] = fakeUpstream.requestsFor('req-skill-3');
     expect(manySkillsUpstream!.body).toMatchObject({
       skillIds: ['poster-kit', 'slide-kit', 'icon-kit'],
+      agentId: RUN_AGENT_ID,
     });
-    expect(manySkillsUpstream!.body).not.toHaveProperty('agentId');
   });
 
-  it('passes an explicit non-DSH agentId through unchanged (multi-provider)', async () => {
+  it('rejects an explicit non-DSH agentId without contacting upstream', async () => {
+    const upstreamCount = fakeUpstream.requests.length;
     const response = await createPaidRun({
       clientRequestId: 'req-claude',
       agentId: 'claude',
       message: 'claude',
       currentPrompt: 'claude',
     });
-    expect(response.status).toBe(201);
-    const [upstream] = fakeUpstream.requestsFor('req-claude');
-    expect(upstream!.body).toMatchObject({ agentId: 'claude', message: 'claude' });
-    expect(await runCharge(richAccount.accountId, 'req-claude')).toBeDefined();
+    expect(response.status).toBe(409);
+    const payload = (await response.json()) as { code: string; status: number };
+    expect(payload).toMatchObject({ code: 'aurora_agent_not_supported', status: 409 });
+    expect(fakeUpstream.requests.length).toBe(upstreamCount);
+    expect(await runCharge(richAccount.accountId, 'req-claude')).toBeUndefined();
   });
   it('rejects a missing, empty, or non-string clientRequestId before reserving', async () => {
     const upstreamCount = fakeUpstream.requests.length;
@@ -460,8 +463,8 @@ describe('Aurora paid run admission', () => {
     expect(attempts.every((attempt) => attempt.body.clientRequestId === 'req-lost')).toBe(
       true,
     );
-    // The retry body stays byte-identical and carries no injected agent.
-    expect(attempts[2]!.body).not.toHaveProperty('agentId');
+    // The retry body stays byte-identical and always carries the DSH agent.
+    expect(attempts[2]!.body).toMatchObject({ agentId: RUN_AGENT_ID });
     const recoveredCharge = await runCharge(richAccount.accountId, 'req-lost');
     expect(recoveredCharge!.run_id).toBe(payload.runId);
     expect(payload.reused).toBe(true);
