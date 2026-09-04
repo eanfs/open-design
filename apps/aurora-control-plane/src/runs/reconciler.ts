@@ -1,7 +1,8 @@
 import { AuroraLedgerError, closeAuroraReservation } from '../commerce/ledger.js';
 import { withAuroraTransaction, type AuroraDatabase } from '../db.js';
-import { listReservedRunCharges, runChargeReservationKey } from './admission.js';
-import type { OpenDesignUpstream, RunStatusFetchOutcome } from './upstream.js';
+import type { TenantRouteStore } from '../tenants/routes.js';
+import { runChargeReservationKey } from './admission.js';
+import { createOpenDesignUpstream, type RunStatusFetchOutcome } from './upstream.js';
 
 /**
  * Task 7 reconciliation: paid-run reservations are settled or released from
@@ -171,26 +172,68 @@ export interface ReconcileCycleResult {
 
 export interface ReconcileCycleDeps {
   readonly db: AuroraDatabase;
-  readonly upstream: OpenDesignUpstream;
+  /** Resolves each reserved charge's tenant to the upstream to poll. */
+  readonly tenants: TenantRouteStore;
 }
 
 /**
- * One full poll pass: read every reserved charge that carries a run id, ask
- * the upstream for each run's status, and settle/release/retry accordingly.
- * A charge that throws is counted and logged but never aborts the pass, so
- * one bad row cannot starve the others.
+ * A reserved charge plus the tenant whose upstream its run was created on.
+ * The tenant comes from the owning account (one account, one tenant) and the
+ * upstream is resolved through the tenant route store per charge, matching
+ * Task 8 admission: the browser never selects the OpenDesign target.
+ */
+interface ReservedReconcileCharge extends ReconcileChargeRef {
+  readonly runId: string;
+  readonly tenantId: string;
+}
+
+async function listReservedReconcileCharges(
+  db: AuroraDatabase,
+): Promise<ReservedReconcileCharge[]> {
+  const result = await db.query<{
+    account_id: string;
+    client_request_id: string;
+    run_id: string;
+    tenant_id: string;
+  }>(
+    `SELECT c.account_id, c.client_request_id, c.run_id, a.tenant_id
+     FROM run_charges c
+     JOIN accounts a ON a.id = c.account_id
+     WHERE c.state = 'reserved' AND c.run_id IS NOT NULL
+     ORDER BY c.created_at`,
+  );
+  return result.rows.map((row) => ({
+    accountId: row.account_id,
+    clientRequestId: row.client_request_id,
+    runId: row.run_id,
+    tenantId: row.tenant_id,
+  }));
+}
+
+/**
+ * One full poll pass: read every reserved charge that carries a run id,
+ * resolve its tenant's upstream, ask that upstream for the run's status, and
+ * settle/release/retry accordingly. A charge that throws is counted and
+ * logged but never aborts the pass, so one bad row cannot starve the others.
  */
 export async function reconcileReservedCharges(
   deps: ReconcileCycleDeps,
 ): Promise<ReconcileCycleResult> {
-  const charges = await listReservedRunCharges(deps.db);
+  const charges = await listReservedReconcileCharges(deps.db);
   const result: ReconcileCycleResult = { settled: 0, released: 0, retried: 0, failed: 0 };
   for (const charge of charges) {
-    if (charge.runId === null) {
-      continue;
-    }
     try {
-      const fetched = await deps.upstream.fetchRunStatus(charge.runId);
+      const route = await deps.tenants.getByTenantId(charge.tenantId);
+      // A tenant with no configured route cannot be polled; keep the
+      // reservation for the next pass rather than guessing at an upstream.
+      if (route === null) {
+        result.retried += 1;
+        continue;
+      }
+      const upstream = createOpenDesignUpstream({
+        baseUrl: route.upstreamOrigin.toString(),
+      });
+      const fetched = await upstream.fetchRunStatus(charge.runId);
       const applied = await reconcileRunCharge(deps.db, charge, reconcileOutcomeOf(fetched));
       if (applied === 'settled') result.settled += 1;
       else if (applied === 'released') result.released += 1;
@@ -237,7 +280,7 @@ export function startRunReconciliationScheduler(
     }
     cycleInFlight = true;
     try {
-      await reconcileReservedCharges({ db: deps.db, upstream: deps.upstream });
+      await reconcileReservedCharges({ db: deps.db, tenants: deps.tenants });
     } catch (error) {
       console.error('Aurora run reconciliation pass failed:', error);
     } finally {

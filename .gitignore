@@ -110,6 +110,12 @@ deploy/agent-bins/
 .slim/worktrees/
 .slim/worktrees.json
 
+# Agent session scratch (worktrees, tool state) — must stay git-ignored so pnpm guard does not scan them
+/.worktrees/
+/.worktree/
+/.ua/
+/.superpowers/
+
 # Python bytecode from workflow helper self-checks / local compile.
 __pycache__/
 *.py[cod]

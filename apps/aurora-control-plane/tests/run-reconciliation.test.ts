@@ -26,7 +26,7 @@ import {
 } from '../src/auth/session-store.js';
 import type { AuroraConfig } from '../src/config.js';
 import { runChargeReservationKey } from '../src/runs/admission.js';
-import { createOpenDesignUpstream } from '../src/runs/upstream.js';
+import { createTenantRouteStore } from '../src/tenants/routes.js';
 import {
   decisionForRunStatus,
   normalizeRunStatus,
@@ -38,7 +38,6 @@ import {
 const SESSION_COOKIE = '__Host-aurora_session';
 const RUN_PRICE_AMOUNT = '0.50';
 const RUN_PRICING_VERSION = '2026-09';
-const RUN_AGENT_ID = 'deepseek-harness';
 
 function readRequestBody(request: IncomingMessage): Promise<string> {
   const { promise, resolve, reject } = Promise.withResolvers<string>();
@@ -212,6 +211,7 @@ describe('Aurora run settlement reconciliation', () => {
       '002-commerce.sql',
       '003-ledger.sql',
       '004-run-charges.sql',
+      '005-tenant-routes.sql',
     ]) {
       const migration = await readFile(
         new URL(`../src/migrations/${file}`, import.meta.url),
@@ -238,6 +238,15 @@ describe('Aurora run settlement reconciliation', () => {
       email: `reconcile-user-${accountCounter}@example.com`,
       displayName: `reconcile-user-${accountCounter}`,
     });
+    // Each account's tenant is routed to the shared fake OpenDesign
+    // upstream; the browser never supplies this mapping.
+    await pool.query(
+      'INSERT INTO tenant_routes (tenant_id, upstream_origin) VALUES ($1, $2)',
+      [
+        principal.tenantId,
+        `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
+      ],
+    );
     const store = createAuroraSessionStore(pool, { ttlSeconds: 3600 });
     const nullTokens = {
       accessToken: null,
@@ -488,9 +497,7 @@ describe('Aurora run settlement reconciliation', () => {
 
     const summary = await reconcileReservedCharges({
       db: pool,
-      upstream: createOpenDesignUpstream({
-        baseUrl: `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
-      }),
+      tenants: createTenantRouteStore(pool),
     });
 
     expect(summary).toEqual({ settled: 1, released: 2, retried: 1, failed: 0 });
@@ -519,9 +526,7 @@ describe('Aurora run settlement reconciliation', () => {
 
     let summary = await reconcileReservedCharges({
       db: pool,
-      upstream: createOpenDesignUpstream({
-        baseUrl: `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
-      }),
+      tenants: createTenantRouteStore(pool),
     });
     expect(summary).toEqual({ settled: 0, released: 0, retried: 1, failed: 0 });
     expect(await loadCharge(accountId, 'recover-me')).toMatchObject({ state: 'reserved' });
@@ -534,9 +539,7 @@ describe('Aurora run settlement reconciliation', () => {
     fakeUpstream.setRunStatus('recover-me', 'succeeded');
     summary = await reconcileReservedCharges({
       db: pool,
-      upstream: createOpenDesignUpstream({
-        baseUrl: `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
-      }),
+      tenants: createTenantRouteStore(pool),
     });
     expect(summary).toEqual({ settled: 1, released: 0, retried: 0, failed: 0 });
     expect(await loadCharge(accountId, 'recover-me')).toMatchObject({ state: 'settled' });
@@ -550,9 +553,7 @@ describe('Aurora run settlement reconciliation', () => {
 
     const scheduler = startRunReconciliationScheduler({
       db: pool,
-      upstream: createOpenDesignUpstream({
-        baseUrl: `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
-      }),
+      tenants: createTenantRouteStore(pool),
       intervalMs: 30,
     });
     try {
@@ -595,6 +596,7 @@ describe('Aurora run commerce error contract', () => {
       '002-commerce.sql',
       '003-ledger.sql',
       '004-run-charges.sql',
+      '005-tenant-routes.sql',
     ]) {
       const migration = await readFile(
         new URL(`../src/migrations/${file}`, import.meta.url),
@@ -625,9 +627,6 @@ describe('Aurora run commerce error contract', () => {
         secretKey: 'sk_test_aurora',
         webhookSecret: 'whsec_test_aurora',
       },
-      runs: {
-        upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}`,
-      },
     };
     appServer = createAuroraApp({ db: pool, config }).listen(config.port, config.host);
     await new Promise<void>((resolve) => appServer.once('listening', resolve));
@@ -646,6 +645,12 @@ describe('Aurora run commerce error contract', () => {
         email: `${subject}@example.com`,
         displayName: subject,
       });
+      // Each account's tenant is routed to the shared fake OpenDesign
+      // upstream; the browser never supplies this mapping.
+      await pool.query(
+        'INSERT INTO tenant_routes (tenant_id, upstream_origin) VALUES ($1, $2)',
+        [principal.tenantId, `http://127.0.0.1:${upstreamPort}`],
+      );
       const cookie = await store.create(principal, nullTokens);
       return [principal, cookie];
     };
@@ -736,6 +741,15 @@ describe('Aurora run commerce error contract', () => {
       email: `error-user-scenario-${accountCounter}@example.com`,
       displayName: `error-user-scenario-${accountCounter}`,
     });
+    // Each account's tenant is routed to the shared fake OpenDesign
+    // upstream; the browser never supplies this mapping.
+    await pool.query(
+      'INSERT INTO tenant_routes (tenant_id, upstream_origin) VALUES ($1, $2)',
+      [
+        principal.tenantId,
+        `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
+      ],
+    );
     const nullTokens = {
       accessToken: null,
       refreshToken: null,
@@ -766,13 +780,23 @@ describe('Aurora run commerce error contract', () => {
     const missingId = await createPaidRun({ message: 'no id', currentPrompt: 'no id' });
     await expectCommerceError(missingId, 409, 'aurora_run_request_invalid');
 
-    const wrongAgent = await createPaidRun({
-      clientRequestId: 'req-agent',
-      agentId: 'claude',
-      message: 'claude',
-      currentPrompt: 'claude',
-    });
-    await expectCommerceError(wrongAgent, 409, 'aurora_agent_not_supported');
+    // A replayed clientRequestId bound to a different body is a 409 conflict.
+    // The wrong-agent rejection was removed by task-8's tenant admission, so
+    // an explicit agentId now passes through to the tenant's upstream.
+    const conflicting = await createPaidRun(
+      { clientRequestId: 'req-conflict', message: 'first body', currentPrompt: 'first body' },
+      richCookie,
+    );
+    expect(conflicting.status).toBe(201);
+    const conflictReplay = await createPaidRun(
+      {
+        clientRequestId: 'req-conflict',
+        message: 'different body',
+        currentPrompt: 'different body',
+      },
+      richCookie,
+    );
+    await expectCommerceError(conflictReplay, 409, 'aurora_run_request_conflict');
   });
 
   it('releases the reservation immediately on a deterministic upstream 4xx and never re-charges a replay', async () => {
@@ -921,9 +945,7 @@ describe('Aurora run commerce error contract', () => {
     fakeUpstream.setRunStatus(runId, 'succeeded');
     const summary = await reconcileReservedCharges({
       db: pool,
-      upstream: createOpenDesignUpstream({
-        baseUrl: `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
-      }),
+      tenants: createTenantRouteStore(pool),
     });
     expect(summary).toEqual({ settled: 1, released: 0, retried: 0, failed: 0 });
     expect(await loadCharge(accountId, 'req-full-loop')).toMatchObject({
@@ -961,9 +983,7 @@ describe('Aurora run commerce error contract', () => {
     fakeUpstream.setRunStatus(runId, 'failed');
     const summary = await reconcileReservedCharges({
       db: pool,
-      upstream: createOpenDesignUpstream({
-        baseUrl: `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
-      }),
+      tenants: createTenantRouteStore(pool),
     });
     expect(summary).toEqual({ settled: 0, released: 1, retried: 0, failed: 0 });
     expect(await loadCharge(accountId, 'req-failed-run')).toMatchObject({

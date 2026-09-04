@@ -22,7 +22,6 @@ import type { AuroraConfig } from '../src/config.js';
 const SESSION_COOKIE = '__Host-aurora_session';
 const RUN_PRICE_AMOUNT = '0.50';
 const RUN_PRICING_VERSION = '2026-09';
-const RUN_AGENT_ID = 'deepseek-harness';
 
 // The fixed run price is server-owned configuration; these literals pin the
 // versioned price the admission route must charge for every run shape.
@@ -160,6 +159,7 @@ describe('Aurora paid run admission', () => {
       '002-commerce.sql',
       '003-ledger.sql',
       '004-run-charges.sql',
+      '005-tenant-routes.sql',
     ]) {
       const migration = await readFile(
         new URL(`../src/migrations/${file}`, import.meta.url),
@@ -190,9 +190,6 @@ describe('Aurora paid run admission', () => {
         secretKey: 'sk_test_aurora',
         webhookSecret: 'whsec_test_aurora',
       },
-      runs: {
-        upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}`,
-      },
     };
     appServer = createAuroraApp({ db: pool, config }).listen(config.port, config.host);
     await new Promise<void>((resolve) => appServer.once('listening', resolve));
@@ -211,6 +208,12 @@ describe('Aurora paid run admission', () => {
         email: `${subject}@example.com`,
         displayName: subject,
       });
+      // Each account's tenant is routed to the shared fake OpenDesign
+      // upstream; the browser never supplies this mapping.
+      await pool.query(
+        'INSERT INTO tenant_routes (tenant_id, upstream_origin) VALUES ($1, $2)',
+        [principal.tenantId, `http://127.0.0.1:${upstreamPort}`],
+      );
       const cookie = await store.create(principal, nullTokens);
       return [principal, cookie];
     };
@@ -303,10 +306,12 @@ describe('Aurora paid run admission', () => {
     const [upstream] = fakeUpstream.requestsFor('req-1');
     expect(upstream!.body).toMatchObject({
       clientRequestId: 'req-1',
-      agentId: RUN_AGENT_ID,
       message: 'Design a poster',
       currentPrompt: 'Design a poster',
     });
+    // No agent is injected: an omitted agentId stays omitted so the tenant's
+    // OpenDesign instance picks its own provider.
+    expect(upstream!.body).not.toHaveProperty('agentId');
 
     const charge = await runCharge(richAccount.accountId, 'req-1');
     expect(charge).toMatchObject({
@@ -342,7 +347,7 @@ describe('Aurora paid run admission', () => {
     });
   });
 
-  it('passes zero, one, and many skills through unchanged and accepts an explicit DSH agentId', async () => {
+  it('passes zero, one, and many skills through unchanged without injecting an agent', async () => {
     const oneSkill = await createPaidRun({
       clientRequestId: 'req-skill-1',
       skillId: 'poster-kit',
@@ -357,26 +362,28 @@ describe('Aurora paid run admission', () => {
       currentPrompt: 'many',
     });
     expect(manySkills.status).toBe(201);
-    const explicitDsh = await createPaidRun({
-      clientRequestId: 'req-dsh-1',
-      agentId: 'deepseek-harness',
-      message: 'dsh',
-      currentPrompt: 'dsh',
-    });
-    expect(explicitDsh.status).toBe(201);
 
     const [oneSkillUpstream] = fakeUpstream.requestsFor('req-skill-1');
-    expect(oneSkillUpstream!.body).toMatchObject({
-      skillId: 'poster-kit',
-      agentId: RUN_AGENT_ID,
-    });
+    expect(oneSkillUpstream!.body).toMatchObject({ skillId: 'poster-kit' });
+    expect(oneSkillUpstream!.body).not.toHaveProperty('agentId');
     const [manySkillsUpstream] = fakeUpstream.requestsFor('req-skill-3');
     expect(manySkillsUpstream!.body).toMatchObject({
       skillIds: ['poster-kit', 'slide-kit', 'icon-kit'],
-      agentId: RUN_AGENT_ID,
     });
-    const [explicitDshUpstream] = fakeUpstream.requestsFor('req-dsh-1');
-    expect(explicitDshUpstream!.body).toMatchObject({ agentId: RUN_AGENT_ID });
+    expect(manySkillsUpstream!.body).not.toHaveProperty('agentId');
+  });
+
+  it('passes an explicit non-DSH agentId through unchanged (multi-provider)', async () => {
+    const response = await createPaidRun({
+      clientRequestId: 'req-claude',
+      agentId: 'claude',
+      message: 'claude',
+      currentPrompt: 'claude',
+    });
+    expect(response.status).toBe(201);
+    const [upstream] = fakeUpstream.requestsFor('req-claude');
+    expect(upstream!.body).toMatchObject({ agentId: 'claude', message: 'claude' });
+    expect(await runCharge(richAccount.accountId, 'req-claude')).toBeDefined();
   });
   it('rejects a missing, empty, or non-string clientRequestId before reserving', async () => {
     const upstreamCount = fakeUpstream.requests.length;
@@ -395,21 +402,6 @@ describe('Aurora paid run admission', () => {
       availableCredits: '8.00',
       reservedCredits: '2.00',
     });
-  });
-
-  it('rejects an explicit non-DSH agentId without contacting upstream', async () => {
-    const upstreamCount = fakeUpstream.requests.length;
-    const response = await createPaidRun({
-      clientRequestId: 'req-claude',
-      agentId: 'claude',
-      message: 'claude',
-      currentPrompt: 'claude',
-    });
-    expect(response.status).toBe(409);
-    const payload = (await response.json()) as { code: string; status: number };
-    expect(payload).toMatchObject({ code: 'aurora_agent_not_supported', status: 409 });
-    expect(fakeUpstream.requests.length).toBe(upstreamCount);
-    expect(await runCharge(richAccount.accountId, 'req-claude')).toBeUndefined();
   });
 
   it('rejects a duplicate clientRequestId whose body digest differs', async () => {
@@ -468,7 +460,8 @@ describe('Aurora paid run admission', () => {
     expect(attempts.every((attempt) => attempt.body.clientRequestId === 'req-lost')).toBe(
       true,
     );
-    expect(attempts[2]!.body).toMatchObject({ agentId: RUN_AGENT_ID });
+    // The retry body stays byte-identical and carries no injected agent.
+    expect(attempts[2]!.body).not.toHaveProperty('agentId');
     const recoveredCharge = await runCharge(richAccount.accountId, 'req-lost');
     expect(recoveredCharge!.run_id).toBe(payload.runId);
     expect(payload.reused).toBe(true);
@@ -483,6 +476,10 @@ describe('Aurora paid run admission', () => {
       email: 'run-user-orphan@example.com',
       displayName: 'run-user-orphan',
     });
+    await pool.query('INSERT INTO tenant_routes (tenant_id, upstream_origin) VALUES ($1, $2)', [
+      orphanPrincipal.tenantId,
+      `http://127.0.0.1:${(fakeUpstreamServer.address() as AddressInfo).port}`,
+    ]);
     const nullTokens = {
       accessToken: null,
       refreshToken: null,
@@ -502,7 +499,7 @@ describe('Aurora paid run admission', () => {
     // Simulate the crash window between the RunCharge commit and the ledger
     // reservation: insert the charge row by hand and never reserve credits.
     const outgoingDigest = createHash('sha256')
-      .update(JSON.stringify({ ...body, agentId: RUN_AGENT_ID }))
+      .update(JSON.stringify(body))
       .digest('hex');
     await pool.query(
       `INSERT INTO run_charges

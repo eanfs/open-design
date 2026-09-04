@@ -13,8 +13,9 @@
     }
   },
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "pnpm --filter @open-design/aurora-contracts build && tsc -p tsconfig.build.json",
+    "test": "pnpm --filter @open-design/aurora-contracts build && vitest run",
+    "typecheck": "pnpm --filter @open-design/aurora-contracts build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@open-design/aurora-contracts": "workspace:*",

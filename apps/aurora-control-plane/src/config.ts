@@ -25,8 +25,6 @@ export interface AuroraStripeConfig {
 }
 
 export interface AuroraRunsConfig {
-  /** Base URL of the tenant's OpenDesign instance that admitted runs target. */
-  readonly upstreamBaseUrl: string;
   /**
    * Poll cadence for settlement reconciliation of reserved run charges.
    * Falls back to the reconciler default when unset.
@@ -46,9 +44,10 @@ export interface AuroraConfig {
   readonly loginStateSigningSecret: string;
   readonly stripe: AuroraStripeConfig;
   /**
-   * Paid-run admission target; present only on control planes that admit
-   * runs. The fixed run price itself lives in `runs/admission.ts` as the
-   * single versioned server-side constant.
+   * Paid-run surface tuning; present only on control planes that admit runs.
+   * The upstream each admitted run targets is resolved per tenant from
+   * `tenant_routes` (Task 8), never from config. The fixed run price itself
+   * lives in `runs/admission.ts` as the single versioned server-side constant.
    */
   readonly runs?: AuroraRunsConfig;
 }

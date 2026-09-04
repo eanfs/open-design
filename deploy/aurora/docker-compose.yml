@@ -1,0 +1,146 @@
+name: aurora
+
+# Aurora reference deployment (Task 8): one commercial control plane acting as
+# the authenticated gateway, one isolated OpenDesign instance per tenant, and a
+# single PostgreSQL for the control plane's commercial schema.
+#
+# Isolation properties:
+#   - Each tenant runs the standard OpenDesign image (no DSH-only restriction),
+#     so it serves whatever providers the operator configures for it.
+#   - Each tenant has its own named data volume, its own network, its own
+#     credential environment, and its own resource limits. The control plane is
+#     the only service that bridges the tenant networks, so browser traffic can
+#     only ever reach a tenant through the authenticated gateway.
+#   - Tenant upstreams are resolved by the control plane from the server-side
+#     `tenant_routes` table; browsers never select an upstream (see README for
+#     provisioning).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${AURORA_POSTGRES_USER:-aurora}
+      POSTGRES_PASSWORD: ${AURORA_POSTGRES_PASSWORD:-aurora}
+      POSTGRES_DB: ${AURORA_POSTGRES_DB:-aurora}
+    volumes:
+      - aurora_postgres_data:/var/lib/postgresql/data
+    networks:
+      - control
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${AURORA_POSTGRES_USER:-aurora} -d ${AURORA_POSTGRES_DB:-aurora}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: deploy/aurora/Dockerfile
+    restart: always
+    environment:
+      AURORA_HOST: 0.0.0.0
+      AURORA_PORT: 3000
+      AURORA_PUBLIC_ORIGIN: ${AURORA_PUBLIC_ORIGIN:?}
+      AURORA_DATABASE_URL: postgres://${AURORA_POSTGRES_USER:-aurora}:${AURORA_POSTGRES_PASSWORD:-aurora}@postgres:5432/${AURORA_POSTGRES_DB:-aurora}
+      AURORA_OIDC_ISSUER: ${AURORA_OIDC_ISSUER:?}
+      AURORA_OIDC_CLIENT_ID: ${AURORA_OIDC_CLIENT_ID:?}
+      AURORA_OIDC_CLIENT_SECRET: ${AURORA_OIDC_CLIENT_SECRET:?}
+      AURORA_LOGIN_STATE_SIGNING_SECRET: ${AURORA_LOGIN_STATE_SIGNING_SECRET:?}
+      AURORA_STRIPE_SECRET_KEY: ${AURORA_STRIPE_SECRET_KEY:?}
+      AURORA_STRIPE_WEBHOOK_SECRET: ${AURORA_STRIPE_WEBHOOK_SECRET:?}
+      AURORA_SESSION_TTL_SECONDS: ${AURORA_SESSION_TTL_SECONDS:-3600}
+      AURORA_MIGRATIONS_DIR: /app/migrations
+    ports:
+      - "127.0.0.1:${AURORA_CONTROL_PLANE_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - control
+      - tenant-a
+      - tenant-b
+    mem_limit: ${AURORA_CONTROL_PLANE_MEM_LIMIT:-384m}
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/aurora/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  tenant-a:
+    image: ${OPEN_DESIGN_IMAGE:-ghcr.io/nexu-io/od:latest}
+    restart: always
+    environment:
+      NODE_ENV: production
+      OD_BIND_HOST: 0.0.0.0
+      OD_PORT: 7456
+      OD_WEB_PORT: 7456
+      OD_ALLOWED_ORIGINS: ${AURORA_PUBLIC_ORIGIN:?}
+      # The daemon refuses to bind 0.0.0.0 without OD_API_TOKEN or
+      # OD_DISABLE_API_AUTH=1. The control-plane gateway is the trusted
+      # reverse proxy that authenticates every request, so the tenant's own
+      # API auth is disabled here (operators may set a per-tenant
+      # OD_API_TOKEN instead).
+      OD_DISABLE_API_AUTH: "1"
+      # Explicit final data root matching the named volume, so a change in the
+      # image workdir or launcher cannot silently move data out of the volume.
+      OD_DATA_DIR: /app/.od
+      # Tenant A's provider credentials are injected by the operator (see
+      # README) and never shared with tenant B.
+    volumes:
+      - tenant_a_data:/app/.od
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - tenant-a
+    ports:
+      - "127.0.0.1:${AURORA_TENANT_A_PORT:-17456}:7456"
+    mem_limit: ${AURORA_TENANT_MEM_LIMIT:-384m}
+    cpus: ${AURORA_TENANT_CPUS:-1}
+    pids_limit: 256
+
+  tenant-b:
+    image: ${OPEN_DESIGN_IMAGE:-ghcr.io/nexu-io/od:latest}
+    restart: always
+    environment:
+      NODE_ENV: production
+      OD_BIND_HOST: 0.0.0.0
+      OD_PORT: 7456
+      OD_WEB_PORT: 7456
+      OD_ALLOWED_ORIGINS: ${AURORA_PUBLIC_ORIGIN:?}
+      OD_DISABLE_API_AUTH: "1"
+      OD_DATA_DIR: /app/.od
+    volumes:
+      - tenant_b_data:/app/.od
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - tenant-b
+    ports:
+      - "127.0.0.1:${AURORA_TENANT_B_PORT:-17457}:7456"
+    mem_limit: ${AURORA_TENANT_MEM_LIMIT:-384m}
+    cpus: ${AURORA_TENANT_CPUS:-1}
+    pids_limit: 256
+
+networks:
+  control:
+  tenant-a:
+  tenant-b:
+
+volumes:
+  aurora_postgres_data:
+  tenant_a_data:
+  tenant_b_data:
