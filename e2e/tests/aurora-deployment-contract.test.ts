@@ -13,14 +13,15 @@ import {
   type AuroraConfig,
 } from '@open-design/aurora-control-plane';
 
-// Task 8 deployment contract (issue #13, adapted: no DSH-only restriction).
+// Task 8 deployment contract (issue #13, DSH-only: each tenant instance only
+// installs/configures the deepseek-harness runtime).
 //
 // This is an integration contract test, not a user-facing e2e flow: it
 // composes the real Aurora control plane (via its public package boundary)
 // with a real PostgreSQL and two isolated OpenDesign tenant stand-ins, then
 // verifies the dual-tenant routing/isolation contract through real HTTP:
 //   - each authenticated tenant is routed to its own upstream,
-//   - agents are served multi-provider and never leak across tenants,
+//   - agents are served DSH-only and never leak across tenants,
 //   - project data never crosses tenants,
 //   - a browser-supplied upstream URL is ignored.
 //
@@ -126,8 +127,8 @@ describe('Aurora dual-tenant deployment contract', () => {
     pool = new Pool({ connectionString: container.getConnectionUri() });
     await applyAuroraMigrations(pool);
 
-    tenantA = new FakeOpenDesignTenant({ name: 'tenant-a', agentIds: ['deepseek-harness', 'claude'] });
-    tenantB = new FakeOpenDesignTenant({ name: 'tenant-b', agentIds: ['gemini', 'grok'] });
+    tenantA = new FakeOpenDesignTenant({ name: 'tenant-a', agentIds: ['deepseek-harness'] });
+    tenantB = new FakeOpenDesignTenant({ name: 'tenant-b', agentIds: ['deepseek-harness'] });
     const startedA = await tenantA.start();
     const startedB = await tenantB.start();
     tenantAServer = startedA.server;
@@ -176,19 +177,19 @@ describe('Aurora dual-tenant deployment contract', () => {
     });
   }
 
-  it('routes each authenticated tenant to its own upstream and serves multi-provider agents', async () => {
+  it('routes each authenticated tenant to its own upstream and serves the DSH-only runtime', async () => {
     const healthA = await gateway('/api/health', cookieA);
     expect(healthA.status).toBe(200);
     expect(await healthA.json()).toEqual({ ok: true, tenant: 'tenant-a' });
 
     const agentsA = await gateway('/api/agents', cookieA);
     expect(agentsA.status).toBe(200);
-    // Multi-provider, not DSH-only: tenant A's instance serves more than one
-    // agent and the gateway neither restricts nor rewrites the list.
-    expect(await agentsA.json()).toEqual({ agents: ['deepseek-harness', 'claude'] });
+    // DSH-only (issue #13): each tenant instance only installs/configures the
+    // deepseek-harness runtime, and the gateway passes the list through.
+    expect(await agentsA.json()).toEqual({ agents: ['deepseek-harness'] });
 
     const agentsB = await gateway('/api/agents', cookieB);
-    expect(await agentsB.json()).toEqual({ agents: ['gemini', 'grok'] });
+    expect(await agentsB.json()).toEqual({ agents: ['deepseek-harness'] });
   });
 
   it('never leaks project data across tenants', async () => {
