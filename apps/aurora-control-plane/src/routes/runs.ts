@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from 'express';
+import express, { type Request, type RequestHandler, type Response } from 'express';
 import { Router } from 'express';
 
 import { requireSameOriginForMutations } from '../auth/origin-guard.js';
@@ -7,12 +7,23 @@ import type { AuroraConfig } from '../config.js';
 import type { AuroraDatabase } from '../db.js';
 import { admitPaidRun } from '../runs/admission.js';
 import { createOpenDesignUpstream } from '../runs/upstream.js';
+import type { TenantRouteStore } from '../tenants/routes.js';
 import { requireAuroraSession } from './session.js';
 
 export interface RunsRouterDeps {
   readonly db: AuroraDatabase;
   readonly config: AuroraConfig;
+  readonly tenants: TenantRouteStore;
 }
+
+const TENANT_NOT_ROUTED = {
+  status: 404,
+  body: {
+    code: 'aurora_tenant_route_missing',
+    message: 'The authenticated tenant has no configured OpenDesign upstream',
+    status: 404,
+  },
+};
 
 function readPrincipal(response: Response): AuroraPrincipal {
   const principal = response.locals.auroraPrincipal;
@@ -23,36 +34,44 @@ function readPrincipal(response: Response): AuroraPrincipal {
 }
 
 /**
- * Paid-run admission: `POST /runs` authenticates the session, enforces
- * same-origin, and hands the body to the admission service, which reserves
- * the fixed price and forwards the run to the configured OpenDesign upstream.
- * Responses carry the upstream body verbatim (201 on success) or typed
- * commerce errors.
+ * Paid-run admission chain shared by the control-plane `/api/aurora/runs`
+ * surface and the gateway `POST /api/runs` interception, so the opaque proxy
+ * can never forward a paid run without reserving and charging first. The
+ * upstream is resolved per request from the session tenant's route: the
+ * browser never selects the OpenDesign target.
  */
-export function createRunsRouter(deps: RunsRouterDeps): Router {
-  const runs = deps.config.runs;
-  if (runs === undefined) {
-    throw new Error('Aurora run admission requires the runs.upstreamBaseUrl configuration');
-  }
-  const upstream = createOpenDesignUpstream({ baseUrl: runs.upstreamBaseUrl });
+export function createRunAdmission(deps: RunsRouterDeps): RequestHandler[] {
   const store = createAuroraSessionStore(deps.db, { ttlSeconds: deps.config.sessionTtlSeconds });
+  const admit: RequestHandler = async (request, response, next) => {
+    try {
+      const principal = readPrincipal(response);
+      const route = await deps.tenants.getByTenantId(principal.tenantId);
+      if (route === null) {
+        response.status(TENANT_NOT_ROUTED.status).json(TENANT_NOT_ROUTED.body);
+        return;
+      }
+      const upstream = createOpenDesignUpstream({ baseUrl: route.upstreamOrigin.toString() });
+      const result = await admitPaidRun(
+        { db: deps.db, upstream },
+        principal.accountId,
+        request.body,
+      );
+      response.status(result.status).json(result.body);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  return [
+    requireSameOriginForMutations(deps.config.publicOrigin),
+    express.json(),
+    requireAuroraSession(store),
+    admit,
+  ];
+}
+
+export function createRunsRouter(deps: RunsRouterDeps): Router {
   const router = Router();
-
-  // Router-wide invariant shared with the other Aurora routers: every
-  // state-changing request must be same-origin, so a paid run cannot be
-  // submitted cross-site.
-  router.use(requireSameOriginForMutations(deps.config.publicOrigin));
-  router.use(express.json());
-
-  router.post('/runs', requireAuroraSession(store), async (request: Request, response) => {
-    const principal = readPrincipal(response);
-    const result = await admitPaidRun(
-      { db: deps.db, upstream },
-      principal.accountId,
-      request.body,
-    );
-    response.status(result.status).json(result.body);
-  });
-
+  router.post('/runs', ...createRunAdmission(deps));
   return router;
 }

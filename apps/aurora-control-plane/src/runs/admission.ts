@@ -5,11 +5,7 @@ import {
   createAuroraLedgerService,
 } from '../commerce/ledger.js';
 import { withAuroraTransaction, type AuroraDatabase } from '../db.js';
-import {
-  AURORA_RUN_AGENT_ID,
-  digestAuroraRunBody,
-  type OpenDesignUpstream,
-} from './upstream.js';
+import { digestAuroraRunBody, type OpenDesignUpstream } from './upstream.js';
 
 /**
  * The single versioned fixed price for every paid run. It exists only here,
@@ -185,7 +181,7 @@ async function reserveOrReject(
  * Admit one paid run: authenticate is already done by the route, so this
  * validates the body, resolves the fixed price server-side, claims the unique
  * RunCharge inside a transaction, reserves its credits, forwards the body
- * unchanged except the forced DSH agentId, and persists the returned run id.
+ * unchanged to the tenant's upstream, and persists the returned run id.
  *
  * Idempotency: a repeated clientRequestId with the same outgoing body digest
  * replays the existing run id (or retries the unresolved upstream creation);
@@ -213,17 +209,11 @@ export async function admitPaidRun(
       'A non-empty clientRequestId is required before any credits are reserved',
     );
   }
-  if (record.agentId !== undefined && record.agentId !== AURORA_RUN_AGENT_ID) {
-    return admissionRejection(
-      409,
-      'aurora_agent_not_supported',
-      `Paid runs only admit the ${AURORA_RUN_AGENT_ID} runtime`,
-    );
-  }
-
-  // Everything except agentId travels byte-for-byte as serialized here, and
-  // identical input bodies always produce identical outgoing bytes.
-  const outgoingBody = JSON.stringify({ ...record, agentId: AURORA_RUN_AGENT_ID });
+  // The body travels byte-for-byte as serialized here, unchanged: Aurora does
+  // not restrict which agent provider a tenant's OpenDesign instance admits,
+  // so an explicit agentId passes through and an omitted one stays omitted.
+  // Identical input bodies always produce identical outgoing bytes.
+  const outgoingBody = JSON.stringify(record);
   const bodyDigest = digestAuroraRunBody(outgoingBody);
 
   const charge = await withAuroraTransaction(deps.db, (client) =>

@@ -1,12 +1,5 @@
 import { createHash } from 'node:crypto';
 
-/**
- * The only runtime admitted for paid runs. A browser body that explicitly
- * names any other agent is rejected; an omitted agentId is filled with this
- * value before the body leaves the control plane (DSH-only admission).
- */
-export const AURORA_RUN_AGENT_ID = 'deepseek-harness';
-
 /** SHA-256 hex digest over the exact outgoing upstream body bytes. */
 export function digestAuroraRunBody(body: string): string {
   return createHash('sha256').update(body, 'utf8').digest('hex');

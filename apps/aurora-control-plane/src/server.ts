@@ -31,3 +31,4 @@ export type { AuroraAppDeps } from './app.js';
 export type { AuroraConfig } from './config.js';
 export { withAuroraTransaction } from './db.js';
 export type { AuroraDatabase } from './db.js';
+export { applyAuroraMigrations } from './migrations.js';
