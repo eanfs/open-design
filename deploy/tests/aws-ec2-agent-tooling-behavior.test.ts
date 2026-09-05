@@ -198,6 +198,14 @@ case "$1" in
     printf '127.0.0.1:43210\n'
     exit 0
     ;;
+  exec)
+    # In-container daemon probe: node -e <probe> /api/health|/api/agents ...
+    # Defaults to a healthy daemon; FAKE_DAEMON_HEALTH=fail makes the probe die.
+    if [ "$FAKE_DAEMON_HEALTH" = "fail" ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
   logs) exit 0 ;;
   *) exit 0 ;;
 esac
@@ -657,4 +665,14 @@ test('verifier passes when the image and daemon gates hold and cleans up owned r
   assert.match(docker, /network rm/);
   assert.match(docker, /volume rm/);
   assert.match(docker, /container rm/);
+});
+
+test('verifier dies when the in-container daemon health probe fails', async () => {
+  const result = await runTooling(verifyImagePath, [], {
+    FAKE_DAEMON_HEALTH: 'fail',
+  });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /did not return \/api\/health/);
+  const docker = await dockerLog(result);
+  assert.match(docker, /exec/);
 });

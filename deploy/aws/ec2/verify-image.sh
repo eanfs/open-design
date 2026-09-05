@@ -189,8 +189,6 @@ fi
 
 load_constants
 require_command docker
-require_command curl
-require_command jq
 require_local_docker_desktop
 
 assert_name_unused container "$PROBE_CONTAINER_NAME"
@@ -283,26 +281,51 @@ DAEMON_CONTAINER_ID="$(docker create \
   --label "$OWNERSHIP_LABEL=$RUN_ID" \
   --network "$NETWORK_ID" \
   --mount "type=volume,source=$VOLUME_ID,target=/app/.od" \
-  --publish 127.0.0.1::7456 \
+  --env OD_BIND_HOST=127.0.0.1 \
   "$image_reference")"
 [[ -n "$DAEMON_CONTAINER_ID" ]] || die "failed to create the daemon container"
 assert_owned_container "$DAEMON_CONTAINER_ID"
 docker start "$DAEMON_CONTAINER_ID" >/dev/null
 
-published_port="$(docker port "$DAEMON_CONTAINER_ID" 7456/tcp)"
-runtime_port="${published_port##*:}"
-[[ "$runtime_port" =~ ^[0-9]+$ ]] || die "could not resolve the daemon's temporary host port"
-base_url="http://127.0.0.1:${runtime_port}"
+# The daemon listens on 127.0.0.1:7456 inside the container. Probe it in-process
+# with node (present in the image); Docker Desktop's vpnkit port forwarding has
+# been observed to answer an empty reply to host-side HTTP, so host curl is not
+# a reliable probe path for this daemon.
+health_node_probe='
+const http = require("http");
+const path = process.argv[1];
+const expected = process.argv[2];
+const req = http.get({ host: "127.0.0.1", port: 7456, path, timeout: 5000 }, (res) => {
+  let body = "";
+  res.on("data", (chunk) => { body += chunk; });
+  res.on("end", () => {
+    try {
+      const json = JSON.parse(body);
+      if (path === "/api/health") {
+        process.exit(json.ok === true && json.version === expected ? 0 : 1);
+      } else {
+        for (const id of JSON.parse(process.argv[3])) {
+          if (!(json.agents ?? []).some((a) => a.id === id && a.available === true)) {
+            console.error(`agent ${id} unavailable`);
+            process.exit(1);
+          }
+        }
+        process.exit(0);
+      }
+    } catch (err) { process.exit(1); }
+  });
+});
+req.on("error", () => process.exit(1));
+req.on("timeout", () => { req.destroy(); process.exit(1); });
+'
+
 health_json=""
 health_deadline=$((SECONDS + 60))
-
 while ((SECONDS < health_deadline)); do
-  if health_json="$(curl --fail --silent --show-error --max-time 3 "$base_url/api/health" 2>/dev/null)" \
-    && jq -e --arg version "$OPENDESIGN_VERSION" \
-      '.ok == true and .version == $version' >/dev/null <<<"$health_json"; then
+  if docker exec "$DAEMON_CONTAINER_ID" node -e "$health_node_probe" /api/health "$OPENDESIGN_VERSION" >/dev/null 2>&1; then
+    health_json="ok"
     break
   fi
-  health_json=""
   sleep 1
 done
 
@@ -311,12 +334,8 @@ if [[ -z "$health_json" ]]; then
   die "official daemon did not return /api/health version $OPENDESIGN_VERSION"
 fi
 
-agents_json="$(curl --fail --silent --show-error --max-time 90 "$base_url/api/agents")" \
-  || die "official daemon did not return /api/agents"
-for agent_id in opencode byok-opencode pi; do
-  jq -e --arg id "$agent_id" \
-    'any(.agents[]?; .id == $id and .available == true)' >/dev/null <<<"$agents_json" \
-    || die "/api/agents did not report $agent_id available"
-done
+if ! docker exec "$DAEMON_CONTAINER_ID" node -e "$health_node_probe" /api/agents "$OPENDESIGN_VERSION" '["opencode","byok-opencode","pi"]' >/dev/null 2>&1; then
+  die "/api/agents did not report opencode, byok-opencode, and pi available"
+fi
 
 printf 'verified %s\n' "$image_reference"
