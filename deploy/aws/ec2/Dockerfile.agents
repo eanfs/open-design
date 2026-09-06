@@ -1,0 +1,21 @@
+FROM ghcr.io/nexu-io/od:0.21.1@sha256:441daca881e699657bacf28e0c27b16cd6be551dfff4bd63368dd74bec581f39
+
+LABEL io.apexai.opendesign.base.image="ghcr.io/nexu-io/od:0.21.1@sha256:441daca881e699657bacf28e0c27b16cd6be551dfff4bd63368dd74bec581f39" \
+      io.apexai.opendesign.base.version="0.21.1" \
+      io.apexai.opendesign.opencode.version="1.18.29" \
+      io.apexai.opendesign.pi.version="0.85.1"
+
+USER root
+
+COPY deploy/aws/ec2/image/package.json deploy/aws/ec2/image/package-lock.json /opt/aod-cli/
+
+RUN cd /opt/aod-cli && npm ci --omit=dev --no-audit --no-fund \
+    && ln -sf /opt/aod-cli/node_modules/.bin/opencode /usr/local/bin/opencode \
+    && ln -sf /opt/aod-cli/node_modules/.bin/opencode /usr/local/bin/opencode-cli \
+    && ln -sf /opt/aod-cli/node_modules/.bin/pi /usr/local/bin/pi
+
+ENV HOME=/app/.od
+ENV OPENCODE_BIN=/usr/local/bin/opencode
+ENV PI_BIN=/usr/local/bin/pi
+
+USER 1001:1001

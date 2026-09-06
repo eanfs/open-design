@@ -1,0 +1,8 @@
+{
+  "name": "open-design-agent-image",
+  "private": true,
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "opencode-ai": "1.18.29"
+  }
+}
