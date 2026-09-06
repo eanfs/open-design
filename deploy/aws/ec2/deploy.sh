@@ -140,7 +140,9 @@ set -euo pipefail
 
 PROJECT='open-design'
 SERVICE='open-design'
-CONTAINER_NAME='open-design-open-design-1'
+CONTAINER_NAME='open-design-daemon'
+HEALTH_RETRY_SECONDS=90
+HEALTH_RETRY_INTERVAL=5
 
 log() { printf '[aod-remote] %s\n' "$*" >&2; }
 fatal() { printf '[aod-remote] FATAL: %s\n' "$*" >&2; exit 1; }
@@ -163,8 +165,9 @@ remote_preflight() {
   [[ "$image_line_count" == "1" ]] || fatal "expected exactly one OPEN_DESIGN_IMAGE= line in .env (found ${image_line_count:-0})"
 
   CURRENT_IMAGE="$(grep '^OPEN_DESIGN_IMAGE=' "$PROD_PATH/.env" | head -n 1 | cut -d= -f2-)"
-  [[ "$CURRENT_IMAGE" =~ ^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$ ]] \
-    || fatal "current OPEN_DESIGN_IMAGE is not an approved repo@sha256 reference"
+  [[ "$CURRENT_IMAGE" =~ ^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ \
+      || "$CURRENT_IMAGE" =~ ^[A-Za-z0-9._/:.-]+$ ]] \
+    || fatal "current OPEN_DESIGN_IMAGE is not an approved image reference"
   log "remote preflight complete"
 }
 
@@ -187,6 +190,19 @@ container_has_data_mount() {
   mounts="$(docker inspect --format '{{range .Mounts}}{{.Source}}={{.Destination}}{{println}}{{end}}' "$container")" \
     || return 1
   grep -Fxq "$DATA_DIR=/app/.od" <<<"$mounts"
+}
+
+ecr_login() {
+  # Authenticate Docker to ECR using the instance role. The password is piped
+  # straight to `docker login`, never written to a file, printed, or included in
+  # the SSM payload.
+  log "authenticating Docker to ECR via instance role"
+  local registry
+  registry="${CANDIDATE%%/*}"
+  if ! aws ecr get-login-password --region "$AWS_REGION" \
+    | docker login --username AWS --password-stdin "$registry" >/dev/null 2>&1; then
+    fatal "unable to authenticate Docker to ECR $registry"
+  fi
 }
 
 pull_and_check_candidate() {
@@ -267,23 +283,30 @@ in_container_health() {
   ' "$EXPECTED_VERSION" >/dev/null 2>&1
 }
 
+wait_for_container_health() {
+  # The daemon cold-starts slowly (plugin registration + telemetry init), so a
+  # single 5s probe right after compose up fails spuriously. Retry until healthy
+  # or a bounded deadline.
+  local container="$1"
+  local deadline=$((SECONDS + HEALTH_RETRY_SECONDS))
+  while ((SECONDS < deadline)); do
+    if in_container_health "$container"; then
+      return 0
+    fi
+    sleep "$HEALTH_RETRY_INTERVAL"
+  done
+  return 1
+}
+
 through_nginx_health() {
-  local nginx_container
-  local host_port
+  local proxy_container
   local body
-  nginx_container="$(docker ps -aq --filter 'name=nginx' --format '{{.ID}}' | head -n 1 || true)"
-  [[ -n "$nginx_container" ]] || { log "nginx container not found"; return 1; }
-  host_port="$(docker inspect --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{if eq $port "80/tcp"}}{{range $bindings}}{{.HostPort}} {{end}}{{end}}{{end}}' "$nginx_container" | awk '{print $1}')" \
-    || return 1
-  if [[ -z "$host_port" ]]; then
-    host_port="$(docker inspect --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{if eq $port "443/tcp"}}{{range $bindings}}{{.HostPort}} {{end}}{{end}}{{end}}' "$nginx_container" | awk '{print $1}')" \
-      || return 1
-  fi
-  [[ -n "$host_port" ]] || { log "nginx publishes neither 80/tcp nor 443/tcp"; return 1; }
-  body="$(curl --fail --silent --show-error --max-time 10 -H "Host: $APP_HOSTNAME" "http://127.0.0.1:${host_port}/api/health")" \
-    || { log "health request through nginx failed"; return 1; }
-  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$body" || { log "health through nginx did not report ok:true"; return 1; }
-  grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"${EXPECTED_VERSION}\"" <<<"$body" || { log "health through nginx version mismatch"; return 1; }
+  proxy_container="$(docker ps -aq --filter 'name=open-design-auth-proxy' --format '{{.ID}}' | head -n 1 || true)"
+  [[ -n "$proxy_container" ]] || { log "open-design auth proxy container not found"; return 1; }
+  body="$(curl --fail --silent --show-error --max-time 10 -H "Host: $APP_HOSTNAME" "http://127.0.0.1:3008/api/health")" \
+    || { log "health request through auth proxy failed"; return 1; }
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$body" || { log "health through auth proxy did not report ok:true"; return 1; }
+  grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"${EXPECTED_VERSION}\"" <<<"$body" || { log "health through auth proxy version mismatch"; return 1; }
   return 0
 }
 
@@ -350,7 +373,7 @@ post_deploy_gates() {
   home_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null | grep '^HOME=' | head -n 1 || true)"
   [[ "$home_env" == "HOME=/app/.od" ]] || { log "unexpected container HOME: ${home_env:-unset}"; return 24; }
   container_has_data_mount "$container" || { log "data mount $DATA_DIR:/app/.od missing"; return 25; }
-  in_container_health "$container" || { log "in-container /api/health gate failed"; return 26; }
+  wait_for_container_health "$container" || { log "in-container /api/health gate failed"; return 26; }
   through_nginx_health || { log "through-nginx /api/health gate failed"; return 27; }
   check_cli_versions "$container" || { log "CLI version gate failed"; return 28; }
   non_od_containers_unchanged || { log "container fingerprint gate failed"; return 29; }
@@ -376,7 +399,7 @@ recover_previous_deployment() {
   fi
   if deploy_service; then
     restored="$(docker ps -aq --filter "name=^${CONTAINER_NAME}$" --format '{{.ID}}' | head -n 1 || true)"
-    if [[ -n "$restored" ]] && in_container_health "$restored"; then
+    if [[ -n "$restored" ]] && wait_for_container_health "$restored"; then
       printf 'FAILED_RECOVERED: %s\n' "$reason"
       exit 30
     fi
@@ -386,6 +409,7 @@ recover_previous_deployment() {
 }
 
 remote_preflight
+ecr_login
 pull_and_check_candidate
 create_snapshot
 atomic_set_image "$CANDIDATE"
@@ -405,6 +429,7 @@ REMOTE_EOF
   local preamble
   preamble="$(
     printf 'CANDIDATE=%q\n' "$CANDIDATE"
+    printf 'AWS_REGION=%q\n' "$AWS_REGION"
     printf 'PROD_PATH=%q\n' "$PRODUCTION_PATH"
     printf 'COMPOSE_FILE=%q\n' "${PRODUCTION_PATH}/docker-compose.prod.yml"
     printf 'DATA_DIR=%q\n' "${PRODUCTION_PATH}/data"
@@ -618,6 +643,6 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   exit 0
 fi
 
-run_remote "$REMOTE_SCRIPT" "deploy OpenDesign $CANDIDATE"
+run_remote "$REMOTE_SCRIPT" "deploy OpenDesign ${CANDIDATE_DIGEST}"
 check_alb_target_health
 log "deployment complete: $CANDIDATE"

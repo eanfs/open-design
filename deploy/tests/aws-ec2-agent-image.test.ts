@@ -384,7 +384,15 @@ test('AWS deployment scripts enforce SSM-only secret-safe remote execution', asy
   assert.doesNotMatch(source, /session-manager-plugin/);
   assert.doesNotMatch(source, new RegExp(`\\b${'s' + 'sh'}\\b`));
   assert.doesNotMatch(source, new RegExp(`${'terra' + 'form'}\\s+${'app' + 'ly'}`));
-  assert.doesNotMatch(source, /get-login-password/);
+  // ECR login is allowed only as an instance-role password-stdin pipeline; the
+  // password then flows straight into `docker login`'s stdin and can never be
+  // written to a file, to stdout, or into the SSM payload.
+  const loginOccurrences = (source.match(/get-login-password/g) ?? []).length;
+  const loginPipelineOccurrences = (
+    source.match(/get-login-password[\s\S]*?\|\s*docker login[\s\S]*?--password-stdin/g) ?? []
+  ).length;
+  assert.ok(loginOccurrences > 0, 'deployment must authenticate to ECR via instance role');
+  assert.equal(loginPipelineOccurrences, loginOccurrences, 'every get-login-password must be a password-stdin pipeline to docker login');
   // .env contents must never reach argv or stdout
   assert.doesNotMatch(source, /cat[^\n]*\.env/);
   assert.doesNotMatch(source, /\.env[^\n]*\bcat\b/);
