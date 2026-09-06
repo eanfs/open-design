@@ -165,8 +165,11 @@ remote_preflight() {
   [[ "$image_line_count" == "1" ]] || fatal "expected exactly one OPEN_DESIGN_IMAGE= line in .env (found ${image_line_count:-0})"
 
   CURRENT_IMAGE="$(grep '^OPEN_DESIGN_IMAGE=' "$PROD_PATH/.env" | head -n 1 | cut -d= -f2-)"
+  # A digest-pinned reference is content-addressed and safe; the only accepted
+  # non-digest form is the known official base tag (the pre-first-deploy
+  # baseline). Arbitrary tags are rejected.
   [[ "$CURRENT_IMAGE" =~ ^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ \
-      || "$CURRENT_IMAGE" =~ ^[A-Za-z0-9._/:.-]+$ ]] \
+      || "$CURRENT_IMAGE" =~ ^ghcr\.io/nexu-io/od:[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || fatal "current OPEN_DESIGN_IMAGE is not an approved image reference"
   log "remote preflight complete"
 }
@@ -300,10 +303,16 @@ wait_for_container_health() {
 
 through_nginx_health() {
   local proxy_container
+  local host_port
   local body
   proxy_container="$(docker ps -aq --filter 'name=open-design-auth-proxy' --format '{{.ID}}' | head -n 1 || true)"
   [[ -n "$proxy_container" ]] || { log "open-design auth proxy container not found"; return 1; }
-  body="$(curl --fail --silent --show-error --max-time 10 -H "Host: $APP_HOSTNAME" "http://127.0.0.1:3008/api/health")" \
+  # Resolve the host-published port from the proxy's own container config so the
+  # probe targets exactly the container we mean to verify (no hardcoded port).
+  host_port="$(docker inspect --format '{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{if ne .HostPort ""}}{{.HostPort}} {{end}}{{end}}{{end}}' "$proxy_container" | awk '{print $1}')" \
+    || return 1
+  [[ -n "$host_port" ]] || { log "open-design auth proxy publishes no host port"; return 1; }
+  body="$(curl --fail --silent --show-error --max-time 10 -H "Host: $APP_HOSTNAME" "http://127.0.0.1:${host_port}/api/health")" \
     || { log "health request through auth proxy failed"; return 1; }
   grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$body" || { log "health through auth proxy did not report ok:true"; return 1; }
   grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"${EXPECTED_VERSION}\"" <<<"$body" || { log "health through auth proxy version mismatch"; return 1; }

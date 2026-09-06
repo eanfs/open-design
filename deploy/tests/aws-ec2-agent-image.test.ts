@@ -386,13 +386,17 @@ test('AWS deployment scripts enforce SSM-only secret-safe remote execution', asy
   assert.doesNotMatch(source, new RegExp(`${'terra' + 'form'}\\s+${'app' + 'ly'}`));
   // ECR login is allowed only as an instance-role password-stdin pipeline; the
   // password then flows straight into `docker login`'s stdin and can never be
-  // written to a file, to stdout, or into the SSM payload.
+  // written to a file, to stdout, or into the SSM payload. The pattern is
+  // anchored to a direct two-command pipeline: no second pipe stage, and only
+  // backslash line continuations may span the two commands.
   const loginOccurrences = (source.match(/get-login-password/g) ?? []).length;
   const loginPipelineOccurrences = (
-    source.match(/get-login-password[\s\S]*?\|\s*docker login[\s\S]*?--password-stdin/g) ?? []
+    source.match(
+      /get-login-password(?:[^|\n]|\\\n)*\|\s*docker login(?:[^|\n]|\\\n)*--password-stdin/g,
+    ) ?? []
   ).length;
   assert.ok(loginOccurrences > 0, 'deployment must authenticate to ECR via instance role');
-  assert.equal(loginPipelineOccurrences, loginOccurrences, 'every get-login-password must be a password-stdin pipeline to docker login');
+  assert.equal(loginPipelineOccurrences, loginOccurrences, 'every get-login-password must be a direct password-stdin pipeline to docker login');
   // .env contents must never reach argv or stdout
   assert.doesNotMatch(source, /cat[^\n]*\.env/);
   assert.doesNotMatch(source, /\.env[^\n]*\bcat\b/);
