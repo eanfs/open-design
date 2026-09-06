@@ -1,0 +1,13 @@
+{
+  "providers": {
+    "volcengine": {
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/plan/v3",
+      "apiKey": "REPLACE_WITH_ARK_AGENT_PLAN_API_KEY"
+    }
+  },
+  "aliases": {
+    "doubao-seedream-3-0-t2i-250415": "doubao-seedream-5.0-lite",
+    "doubao-seedance-2-0-260128": "doubao-seedance-2.0",
+    "doubao-seedance-2-0-fast-260128": "doubao-seedance-2.0-fast"
+  }
+}

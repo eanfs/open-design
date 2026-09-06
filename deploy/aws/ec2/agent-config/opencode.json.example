@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ark-agent-plan": {
+      "name": "ARK Agent Plan",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "apiKey": "REPLACE_WITH_ARK_AGENT_PLAN_API_KEY"
+      },
+      "models": {
+        "doubao-seed-evolving": { "name": "doubao-seed-evolving" },
+        "doubao-seed-2-1-turbo-260628": { "name": "doubao-seed-2-1-turbo-260628" },
+        "doubao-seed-2-0-lite-260215": { "name": "doubao-seed-2-0-lite-260215" },
+        "doubao-seed-2-0-mini-260215": { "name": "doubao-seed-2-0-mini-260215" },
+        "glm-5-3-flash": { "name": "glm-5-3-flash" },
+        "glm-5.3": { "name": "glm-5.3" },
+        "deepseek-v4-pro-ga-260813": { "name": "deepseek-v4-pro-ga-260813" },
+        "deepseek-v4-flash": { "name": "DeepSeek V4 Flash" },
+        "kimi-k3": { "name": "kimi-k3" },
+        "kimi-k2.7-code": { "name": "kimi-k2.7-code" },
+        "minimax-m3": { "name": "minimax-m3" }
+      }
+    },
+    "minimax-coding-plan": {
+      "name": "MiniMax Coding Plan",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "https://api.minimaxi.com/anthropic/v1",
+        "apiKey": "REPLACE_WITH_MINIMAX_API_KEY"
+      },
+      "models": {
+        "MiniMax-M3": { "name": "MiniMax-M3" },
+        "MiniMax-M2.7": { "name": "MiniMax-M2.7" },
+        "MiniMax-M2.7-highspeed": { "name": "MiniMax-M2.7-highspeed" },
+        "MiniMax-M2.5": { "name": "MiniMax-M2.5" },
+        "MiniMax-M2.5-highspeed": { "name": "MiniMax-M2.5-highspeed" },
+        "MiniMax-M2.1": { "name": "MiniMax-M2.1" },
+        "MiniMax-M2.1-highspeed": { "name": "MiniMax-M2.1-highspeed" },
+        "MiniMax-M2": { "name": "MiniMax-M2" }
+      }
+    }
+  }
+}
