@@ -94,6 +94,36 @@ describe('OpenAI-compatible media providers', () => {
     await writeFile(file, JSON.stringify(data), 'utf8');
   }
 
+  it('uses post-alias Seedream dimensions through the full media dispatcher', async () => {
+    for (const key of ['OD_VOLCENGINE_API_KEY', 'ARK_API_KEY', 'VOLCENGINE_API_KEY']) {
+      vi.stubEnv(key, '');
+    }
+    try {
+      await writeConfig({
+        providers: { volcengine: { apiKey: 'test-ark-key', baseUrl: 'https://ark.example.test/api/plan/v3' } },
+        aliases: { 'doubao-seedream-3-0-t2i-250415': 'doubao-seedream-5.0-lite' },
+      });
+      const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+        expect(String(input)).toBe('https://ark.example.test/api/plan/v3/images/generations');
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          model: 'doubao-seedream-5.0-lite', size: '2560x1440',
+        });
+        return new Response(JSON.stringify({ data: [{ b64_json: PNG_BASE64 }] }), { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const result = await generateMedia({
+        projectRoot, projectsRoot, projectId: 'ark-project', surface: 'image',
+        model: 'doubao-seedream-3-0-t2i-250415', aspect: '16:9',
+        prompt: 'A blue teapot', output: 'seedream.png',
+      });
+      expect(result.providerId).toBe('volcengine');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(await readFile(path.join(projectsRoot, 'ark-project', 'seedream.png'))).toEqual(Buffer.from(PNG_BASE64, 'base64'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('renders custom /v1/images/generations providers with configured base URL and model', async () => {
     await writeConfig({
       providers: {

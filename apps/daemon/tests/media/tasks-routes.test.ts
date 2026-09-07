@@ -29,6 +29,33 @@ describe('media task route recovery', () => {
     closeDatabase();
   });
 
+  it('accepts deployment Bearer and Basic credentials without treating them as tool tokens', async () => {
+    vi.stubEnv('OD_API_TOKEN', 'deployment-token-for-media-test');
+    const dataDir = process.env.OD_DATA_DIR;
+    const db = openDatabase(process.cwd(), dataDir === undefined ? {} : { dataDir });
+    const projectId = `project_${randomUUID()}`;
+    const taskId = `task_${randomUUID()}`;
+    const now = Date.now();
+    insertProject(db, { id: projectId, name: 'Deployment-authenticated media', createdAt: now, updatedAt: now });
+    insertMediaTask(db, {
+      id: taskId, projectId, status: 'done', surface: 'image', model: 'fixture-model',
+      progress: [], file: { name: 'generated.png', size: 3 }, startedAt: now, endedAt: now, updatedAt: now,
+    });
+    const started = await startServer({ port: 0, returnServer: true }) as { url: string; server: http.Server };
+    server = started.server;
+    for (const authorization of [
+      'Bearer deployment-token-for-media-test',
+      `Basic ${Buffer.from('open-design:deployment-token-for-media-test').toString('base64')}`,
+    ]) {
+      const response = await fetch(`${started.url}/api/media/tasks/${taskId}/wait`, {
+        method: 'POST', headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ timeoutMs: 0 }),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ status: 'done', file: { name: 'generated.png' } });
+    }
+  });
+
   it('accepts only a same-project token explicitly allowed to poll media tasks', async () => {
     const dataDir = process.env.OD_DATA_DIR;
     const db = openDatabase(process.cwd(), dataDir === undefined ? {} : { dataDir });
