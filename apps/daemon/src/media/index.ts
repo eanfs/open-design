@@ -155,7 +155,7 @@ type MediaContext = {
    * the model id, which is a different vocabulary ('hd' / 'standard').
    */
   quality: string | undefined;
-  /** Published output resolution the caller asked for. Vela renderer only. */
+  /** Published output resolution the caller asked for. Vela and Volcengine Seedream renderers. */
   resolution: string | undefined;
   length: number | undefined;
   duration: number | undefined;
@@ -1577,7 +1577,7 @@ async function renderVolcengineImage(ctx: MediaContext, credentials: ProviderCon
     prompt: ctx.prompt || 'A high-quality reference image.',
     response_format: 'b64_json',
     // Ark limits belong to the post-alias model, not the legacy catalog id.
-    size: volcengineImageSizeFor(ctx.wireModel, ctx.aspect),
+    size: volcengineImageSizeFor(ctx.wireModel, ctx.aspect, ctx.resolution),
   };
   const resp = await fetch(`${baseUrl}/images/generations`, withMediaRequestInit(ctx, {
     method: 'POST',

@@ -238,7 +238,7 @@ Run via your shell tool (Bash on Claude Code, exec on Codex/Gemini, etc.):
   --prompt "<full prompt>" \\
   [--aspect 1:1|16:9|9:16|4:3|3:4] \\
   [--quality <tier>]                # vela/* images only; gpt-image-2 accepts low|medium|high
-  [--resolution <res>]              # vela/* images only; e.g. 1K, 2K — must be published for --aspect
+  [--resolution <res>]              # vela/* images (e.g. 1K, 2K; must be published for --aspect) · Volcengine Seedream accepts 2K|3K|4K
   [--length <seconds>]              # video only
   [--duration <seconds>]            # audio only
   [--prompt-influence <0-1>]        # audio:sfx only; higher follows the prompt more closely
@@ -488,7 +488,8 @@ path is given.
    - **Image, best quality (user says "best", "highest quality", "most realistic")**:
      use \`flux-pro-ultra\` — but tell the user it takes 60–180s
    - **Image, default / no preference stated**: use the project metadata's
-     \`imageModel\` if set; otherwise use \`gpt-image-2\`
+     \`imageModel\` if set; otherwise use \`doubao-seedream-3-0-t2i-250415\`
+     (Volcengine Seedream)
    - **Video, best quality**: use project metadata \`videoModel\` if set; otherwise
      \`doubao-seedance-2-0-260128\`
 

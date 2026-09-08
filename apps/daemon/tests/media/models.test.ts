@@ -7,9 +7,9 @@ import {
 } from '../../src/media/models.js';
 
 describe('image model defaults', () => {
-  it('uses Vela as the only default image route', () => {
+  it('marks the Volcengine Seedream catalog id as the only default image model', () => {
     expect(IMAGE_MODELS.filter((model) => model.default).map((model) => model.id)).toEqual([
-      'vela/gpt-image-2',
+      'doubao-seedream-3-0-t2i-250415',
     ]);
     expect(MEDIA_PROVIDERS.some((provider) => provider.id === 'codex')).toBe(false);
     expect(IMAGE_MODELS.some((model) => model.provider === 'codex')).toBe(false);
