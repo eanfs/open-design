@@ -56,6 +56,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { volcengineImageSizeFor } from './volcengine-image-size.js';
 import { Agent as UndiciAgent } from 'undici';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { load as loadHtml } from 'cheerio';
@@ -154,7 +155,7 @@ type MediaContext = {
    * the model id, which is a different vocabulary ('hd' / 'standard').
    */
   quality: string | undefined;
-  /** Published output resolution the caller asked for. Vela renderer only. */
+  /** Published output resolution the caller asked for. Vela and Volcengine Seedream renderers. */
   resolution: string | undefined;
   length: number | undefined;
   duration: number | undefined;
@@ -1575,10 +1576,8 @@ async function renderVolcengineImage(ctx: MediaContext, credentials: ProviderCon
     model: ctx.wireModel,
     prompt: ctx.prompt || 'A high-quality reference image.',
     response_format: 'b64_json',
-    // openaiSizeFor branches on the catalog id (gpt-image-* vs dall-e-*
-    // accept different size enums), so it must NOT see the post-alias
-    // wire name. lefarcen + codex P2 on PR #1309.
-    size: openaiSizeFor(ctx.model, ctx.aspect),
+    // Ark limits belong to the post-alias model, not the legacy catalog id.
+    size: volcengineImageSizeFor(ctx.wireModel, ctx.aspect, ctx.resolution),
   };
   const resp = await fetch(`${baseUrl}/images/generations`, withMediaRequestInit(ctx, {
     method: 'POST',

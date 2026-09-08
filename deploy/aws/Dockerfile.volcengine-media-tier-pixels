@@ -1,0 +1,8 @@
+FROM 389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign:0.21.1-volcengine-20260907-v3@sha256:a9e2aa6326bd72cda495a2c673f35d3022bc45210fd2195f6b52ffd96427e0c8
+USER root
+COPY volcengine-image-size.ts /tmp/media-defaults/
+RUN node -e "const {readFileSync,writeFileSync}=require('fs');const {stripTypeScriptTypes}=require('node:module');writeFileSync('/app/apps/daemon/dist/media/volcengine-image-size.js',stripTypeScriptTypes(readFileSync('/tmp/media-defaults/volcengine-image-size.ts','utf8')));" \
+    && node --check /app/apps/daemon/dist/media/volcengine-image-size.js \
+    && rm -r /tmp/media-defaults
+USER 1001:1001
+LABEL io.apexai.opendesign.media.fix="seedream-tier-aspect-pixels-20260908"

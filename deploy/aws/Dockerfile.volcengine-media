@@ -1,0 +1,11 @@
+# Build from the verified production runtime, retaining the installed agent CLIs.
+FROM 389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign@sha256:5d4b6dd3d6f9bce2c262d3daddee981234a82503c415f87d10226533d153ad48
+USER root
+COPY apply-volcengine-image-size.ts volcengine-image-size.ts /tmp/volcengine-hotfix/
+RUN node --experimental-strip-types /tmp/volcengine-hotfix/apply-volcengine-image-size.ts /app/apps/daemon/dist/media/index.js /tmp/volcengine-hotfix/volcengine-image-size.ts \
+    && node --check /app/apps/daemon/dist/media/index.js \
+    && node --check /app/apps/daemon/dist/media/volcengine-image-size.js \
+    && node --check /app/apps/daemon/dist/routes/media.js \
+    && rm -r /tmp/volcengine-hotfix
+USER 1001:1001
+LABEL io.apexai.opendesign.media.fix="seedream-size-and-wait-auth-20260907"

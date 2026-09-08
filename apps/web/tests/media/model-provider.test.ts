@@ -20,9 +20,10 @@ describe('mediaModelProviderId', () => {
   });
 
   it('resolves static models to their registry provider', () => {
-    // vela/gpt-image-2 is the New Project dialog default → provider vela. On a
-    // SenseAudio run this !== 'senseaudio', so the guard drops the seed and the
-    // user's Settings default is kept.
+    // The New Project dialog default is now doubao-seedream-3-0-t2i-250415
+    // (provider volcengine); vela/gpt-image-2 exercises the same registry
+    // path. On a SenseAudio run both resolve to non-senseaudio providers, so
+    // the guard drops the seed and the user's Settings default is kept.
     expect(mediaModelProviderId('vela/gpt-image-2')).toBe('vela');
     expect(mediaModelProviderId('gpt-image-2')).toBe('openai');
     expect(mediaModelProviderId('senseaudio-image-2.0-260319')).toBe('senseaudio');
@@ -42,7 +43,7 @@ describe('mediaModelProviderId', () => {
 
     // AIHubMix run + AIHubMix pick → carried.
     expect(carries('aihubmix-qwen-image-2-pro', 'aihubmix')).toBe(true);
-    // SenseAudio run + dialog-default Vela model → NOT carried (keeps Settings default).
+    // SenseAudio run + non-SenseAudio pick (vela) → NOT carried (keeps Settings default).
     expect(carries('vela/gpt-image-2', 'senseaudio')).toBe(false);
     // SenseAudio run + SenseAudio pick → carried.
     expect(carries('senseaudio-image-2.0-260319', 'senseaudio')).toBe(true);

@@ -104,12 +104,15 @@ Always quote the prompt value. Never splice unquoted user text into the
 command line. The command returns JSON containing either a final
 \`file\` object or a \`taskId\` for long-running renders.
 
-\`--quality\` and \`--resolution\` apply to \`vela/*\` images only (gpt-image-2
-accepts quality \`low|medium|high\`). Tiers are priced differently, so pass
-\`--quality\` only when the user asked for a tier and omit it otherwise, which
-lets the model's own default decide. A size or tier the user names IS that
-ask, in any language — "2K", "1k", "high quality", "高质量" — so map it onto
-the flag; restating it inside the prompt text does not reach the provider.
+\`--quality\` applies to \`vela/*\` images only (gpt-image-2 accepts quality
+\`low|medium|high\`). \`--resolution\` applies to \`vela/*\` images (e.g.
+\`1K\`, \`2K\`, and must be published for \`--aspect\`) and to Volcengine
+Seedream images, which accept \`2K\`, \`3K\`, \`4K\`. Tiers are priced
+differently, so pass \`--quality\` only when the user asked for a tier and
+omit it otherwise, which lets the model's own default decide. A size or tier
+the user names IS that ask, in any language — "2K", "1k", "high quality",
+"高质量" — so map it onto the flag; restating it inside the prompt text does
+not reach the provider.
 
 OpenDesign Cloud image and video models use the \`vela/*\` catalogue prefix.
 Always invoke those models through \`"$OD_NODE_BIN" "$OD_BIN" media generate\`.

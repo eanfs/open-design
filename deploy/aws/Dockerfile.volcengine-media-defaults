@@ -1,0 +1,7 @@
+FROM 389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign@sha256:86d50644cd115938fc4b2747057c708592cd491e20a282ac044a937ab997dd46
+USER root
+COPY apply-volcengine-media-defaults.ts volcengine-image-size.ts /tmp/media-defaults/
+RUN node --experimental-strip-types /tmp/media-defaults/apply-volcengine-media-defaults.ts /app /tmp/media-defaults/volcengine-image-size.ts \
+    && rm -r /tmp/media-defaults
+USER 1001:1001
+LABEL io.apexai.opendesign.media.fix="seedream-default-and-resolution-20260907"

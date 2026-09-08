@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { apiTokenAuthorizationMatches, apiTokenFromEnv } from '../api-token-auth.js';
 import type { Express } from 'express';
 import type {
   HyperFramesScaffoldRequest,
@@ -940,7 +941,12 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
     if (!isLocalSameOrigin(req, getResolvedPort())) {
       return res.status(403).json({ error: 'cross-origin request rejected' });
     }
-    const authorizationHeader = req.get('authorization');
+    const requestAuthorizationHeader = req.get('authorization');
+    // A valid deployment credential uses normal project authorization. Only
+    // other credentials enter the scoped agent-tool lane (and fail closed).
+    const authorizationHeader = apiTokenAuthorizationMatches(requestAuthorizationHeader, apiTokenFromEnv())
+      ? undefined
+      : requestAuthorizationHeader;
     // Once a caller chooses the tool-token lane, invalid, expired, or
     // under-scoped credentials must not downgrade to project authorization.
     const toolGrant = typeof authorizationHeader === 'string'
