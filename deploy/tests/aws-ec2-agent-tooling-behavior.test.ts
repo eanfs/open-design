@@ -540,7 +540,7 @@ test('publisher pushes and resolves a digest through a normal scan sequence', as
   assert.equal(result.code, 0, result.stderr);
   const lines = result.stdout.trim().split('\n');
   assert.equal(lines.length, 2);
-  assert.match(lines[0], /:od-0\.21\.1-opencode-1\.18\.29-pi-0\.85\.1-r1$/);
+  assert.match(lines[0], /:od-0\.21\.1-opencode-1\.18\.29-pi-0\.85\.1-r2$/);
   assert.match(lines[1], /@sha256:[0-9a-f]{64}$/);
   const docker = await dockerLog(result);
   const loginIndex = docker.indexOf('login');

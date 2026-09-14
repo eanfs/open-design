@@ -205,6 +205,7 @@ test('agent image recipe preserves the official runtime and excludes prohibited 
   assert.doesNotMatch(instructions, /^(?:WORKDIR|ENTRYPOINT|CMD)\b/m);
   assert.deepEqual(instructions.match(/^COPY\s+.+$/gm), [
     'COPY deploy/aws/ec2/image/package.json deploy/aws/ec2/image/package-lock.json /opt/aod-cli/',
+    'COPY deploy/aws/ec2/image/patch-run-body-limit.ts /opt/aod-cli/patch-run-body-limit.ts',
   ]);
 });
 
@@ -233,7 +234,7 @@ test('AWS EC2 image constants contain only the approved non-secret identity', as
     AWS_ACCOUNT_ID: '389656352076',
     AWS_REGION: 'ap-southeast-1',
     ECR_REPOSITORY: 'apexai-opendesign',
-    IMAGE_TAG: 'od-0.21.1-opencode-1.18.29-pi-0.85.1-r1',
+    IMAGE_TAG: 'od-0.21.1-opencode-1.18.29-pi-0.85.1-r2',
     APP_HOSTNAME: 'aod.apexxai.net',
     INSTANCE_NAME: 'apexai-newapi-app',
     PRODUCTION_PATH: '/data/open-design',
@@ -361,7 +362,7 @@ test('AWS EC2 README separates immutable image delivery from deployment', async 
 
   assert.match(source, /deploy\/aws\/ec2\/build-push\.sh/);
   assert.match(source, /deploy\/aws\/ec2\/verify-image\.sh/);
-  assert.match(source, /389656352076\.dkr\.ecr\.ap-southeast-1\.amazonaws\.com\/apexai-opendesign:od-0\.21\.1-opencode-1\.18\.29-pi-0\.85\.1-r1/);
+  assert.match(source, /389656352076\.dkr\.ecr\.ap-southeast-1\.amazonaws\.com\/apexai-opendesign:od-0\.21\.1-opencode-1\.18\.29-pi-0\.85\.1-r2/);
   assert.match(source, /repo@sha256/i);
   assert.match(source, /secret/i);
   assert.match(source, /production host/i);

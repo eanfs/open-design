@@ -18,4 +18,7 @@ ENV HOME=/app/.od
 ENV OPENCODE_BIN=/usr/local/bin/opencode
 ENV PI_BIN=/usr/local/bin/pi
 
+COPY deploy/aws/ec2/image/patch-run-body-limit.ts /opt/aod-cli/patch-run-body-limit.ts
+RUN node /opt/aod-cli/patch-run-body-limit.ts /app/apps/daemon/dist/server.js
+
 USER 1001:1001

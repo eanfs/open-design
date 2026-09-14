@@ -4,10 +4,17 @@ This directory defines the reproducible ARM64 image that derives from the immuta
 
 ## Fixed image identity
 
+The r2 image adds a deployment-local, fail-closed patch for the pinned 0.21.1
+compiled server: POST `/api/runs` accepts at most 20 MiB, while the global JSON
+parser stays at 4 MiB. nginx must enforce `client_max_body_size 20m` on the exact
+run endpoint. The shared AWS WAF exception is managed in the Apex AI edge module;
+its ALB inspection window is not increased by this application limit.
+Verify the patch with `node --test deploy/tests/aws-ec2-run-body-limit.test.ts`.
+
 `app.env` is the checked-in, non-secret source of truth. The human-readable ECR tag is:
 
 ```text
-389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign:od-0.21.1-opencode-1.18.29-pi-0.85.1-r1
+389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign:od-0.21.1-opencode-1.18.29-pi-0.85.1-r2
 ```
 
 The tag is immutable and identifies one build recipe. After a successful push, `build-push.sh` resolves the registry digest. Runtime deployment must use the content identity:
@@ -44,7 +51,7 @@ An explicit immutable tag can be checked with:
 
 ```bash
 deploy/aws/ec2/verify-image.sh \
-  '389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign:od-0.21.1-opencode-1.18.29-pi-0.85.1-r1'
+  '389656352076.dkr.ecr.ap-southeast-1.amazonaws.com/apexai-opendesign:od-0.21.1-opencode-1.18.29-pi-0.85.1-r2'
 ```
 
 Prefer verifying the resolved digest before deployment:
