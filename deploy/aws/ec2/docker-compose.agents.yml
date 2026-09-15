@@ -1,0 +1,26 @@
+# Optional overlay for Dockerfile.agents. Sources must already exist.
+# Keep the base Compose file's daemon data volume mounted as well.
+services:
+  open-design:
+    environment:
+      OPENCODE_CONFIG: /opt/aod-agent-config/opencode.json
+      OD_AGENT_PROFILES_CONFIG: /app/.od/agent-profiles.json
+    volumes:
+      - type: bind
+        source: ${OPENCODE_CONFIG_FILE:?Set OPENCODE_CONFIG_FILE to an existing absolute file path}
+        target: /opt/aod-agent-config/opencode.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PI_MODELS_FILE:?Set PI_MODELS_FILE to an existing absolute file path}
+        target: /app/.od/.pi/agent/models.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_PROFILES_FILE:?Set AGENT_PROFILES_FILE to an existing absolute file path}
+        target: /app/.od/agent-profiles.json
+        read_only: true
+        bind:
+          create_host_path: false

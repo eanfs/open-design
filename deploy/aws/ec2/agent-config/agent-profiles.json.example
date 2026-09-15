@@ -1,0 +1,34 @@
+{
+  "agents": [
+    {
+      "id": "opencode-ark-plan",
+      "name": "OpenCode · ARK Plan",
+      "baseAgent": "opencode",
+      "env": { "OPENCODE_DISABLE_PROJECT_CONFIG": "true" },
+      "defaultModel": "ark-agent-plan/deepseek-v4-flash",
+      "models": ["ark-agent-plan/deepseek-v4-flash"]
+    },
+    {
+      "id": "opencode-minimax-plan",
+      "name": "OpenCode · MiniMax",
+      "baseAgent": "opencode",
+      "env": { "OPENCODE_DISABLE_PROJECT_CONFIG": "true" },
+      "defaultModel": "minimax-coding-plan/MiniMax-M3",
+      "models": ["minimax-coding-plan/MiniMax-M3"]
+    },
+    {
+      "id": "pi-ark-plan",
+      "name": "Pi · ARK Plan",
+      "baseAgent": "pi",
+      "defaultModel": "ark-agent-plan/deepseek-v4-flash",
+      "models": ["ark-agent-plan/deepseek-v4-flash"]
+    },
+    {
+      "id": "pi-minimax-plan",
+      "name": "Pi · MiniMax",
+      "baseAgent": "pi",
+      "defaultModel": "minimax-coding-plan/MiniMax-M3",
+      "models": ["minimax-coding-plan/MiniMax-M3"]
+    }
+  ]
+}

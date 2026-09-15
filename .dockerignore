@@ -16,5 +16,6 @@ deploy/.env
 deploy/**/*.tar
 deploy/**/*.tgz
 deploy/**/*.zip
+deploy/aws/ec2/agent-config
 docs
 story
